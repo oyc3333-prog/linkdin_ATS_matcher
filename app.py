@@ -2,7 +2,6 @@ import streamlit as st
 import pdfplumber
 import sqlite3
 import pandas as pd
-import re
 import spacy
 import time
 from sentence_transformers import SentenceTransformer, util
