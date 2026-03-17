@@ -1,8 +1,8 @@
 streamlit
 pandas
 pdfplumber
-spacy
+spacy==3.7.2
+thinc==8.2.1
 sentence-transformers
 pysqlite3-binary
-pdfplumber
 https://github.com/explosion/spacy-models/releases/download/en_core_web_md-3.7.1/en_core_web_md-3.7.1-py3-none-any.whl
