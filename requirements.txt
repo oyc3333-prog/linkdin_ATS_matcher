@@ -1,6 +1,7 @@
 streamlit
 pandas
 pdfplumber
+numpy==1.26.4
 spacy==3.7.2
 sentence-transformers
 pysqlite3-binary
