@@ -103,6 +103,15 @@ seniority_keywords = {
 }
 # Define gold skills (prioritized in gap analysis)
 gold_skills = {
+
+    #sales
+    "Cold Calling", "Lead Generation", "Outbound Prospecting", "CRM Management",
+    "Salesforce", "HubSpot", "B2B SaaS", "Pipeline Management", "Quota Attainment",
+    "Customer Acquisition", "Relationship Building", "Negotiation", "Closing Deals",
+    "Sales Cycle", "GTM Strategy", "Market Research", "Product Demo",
+    "Account Management", "Objection Handling", "Inbound Leads", "Sales Funnel",
+    "Business Development", "SDR", "BDR", "Hunter Mentality", "Presentation Skills",
+    "Strategic Partnership", "Value-based Selling", "Revenue Growth", "KPI Driven", "sales",
     # Programming Languages & Environments
     'python', 'sql', 'javascript', 'typescript', 'java', 'scala', 'c++', 'julia', 'rust', 
     'r programming', 'golang', 'bash', 'powershell', 'vba', 'html5', 'css3', 'php', 'node.js', 
@@ -267,7 +276,7 @@ def ats_matcher(resume_text, jobs_df):
         skill_percentage = (len(matched_gold) / len(job_gold_skills)) * 100 if job_gold_skills else 0
         
         # חישוב ציון משולב (הנוסחה שלך)
-        combined_score = 35 + (0.6 * match_score + 0.4 * skill_percentage) * 0.65
+        combined_score = 40 + (0.6 * match_score + 0.4 * skill_percentage) * 0.6
         
         # קנס בכירות
         is_senior_job = any(word in job_title.lower() for word in seniority_keywords)
