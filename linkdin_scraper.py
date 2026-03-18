@@ -9,7 +9,7 @@ import time
 # %%
 #Create an empty list to store the job postings
 id_list = []
-
+location = 'Israel'
 
 # %%
   
