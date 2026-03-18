@@ -1,10 +1,14 @@
-# %%
+
 #Import dependencies
 import requests
 from bs4 import BeautifulSoup
 import pandas as pd
 import random
 import time
+import sqlite3
+import numpy as np
+from sentence_transformers import SentenceTransformer
+model = SentenceTransformer('all-MiniLM-L6-v2')
 
 # %%
 #Create an empty list to store the job postings
@@ -141,6 +145,24 @@ today = date.today()
 # הוספת העמודה ל-DataFrame
 jobs_df['search_date'] = today
 
+
+# 1. יצירת הוקטורים (המרה ל-List לצורך Batching)
+all_embeddings = model.encode(jobs_df['description_text'].fillna("").str.lower().tolist())
+
+# 2. הכנסה ל-DF כרשימה של מערכים
+jobs_df['embedding_temp'] = list(all_embeddings)
+
+# 3. הפיכה ל-BLOB בעזרת apply (מוכן ל-SQLite)
+jobs_df['bert_vector'] = jobs_df['embedding_temp'].apply(
+    lambda x: x.astype(np.float32).tobytes() if x is not None else None
+)
+
+# 4. ניקוי עמודת העזר וטעינה ל-SQL
+jobs_df.drop(columns=['embedding_temp'], inplace=True)
+
+
+
+
 # הצגת התוצאה
 print(jobs_df.head())
 
@@ -148,11 +170,6 @@ print(jobs_df.head())
 jobs_df.info()
 
 # %%
-import sqlite3
-import pandas as pd
-
-
-
 # 3. התחברות ל-DB (יוצר את הקובץ אם הוא לא קיים)
 conn = sqlite3.connect('linkedin_jobs.db')
 
@@ -164,22 +181,12 @@ jobs_df.to_sql('jobs', conn, if_exists='append', index=False)
 # 5. סגירת החיבור
 conn.close()
 
-# %%
-# import sqlite3
-# import pandas as pd
-# conn = sqlite3.connect('linkedin_jobs.db')
-# df_jobs = pd.read_sql_query("SELECT * FROM jobs", conn)
-# df_jobs.head()
+# 1. הכנת רשימת הטקסטים (המרת העמודה לרשימה)
+sentences = jobs_df['description_text'].str.lower().tolist()
 
-# %%
-# from sentence_transformers import SentenceTransformer
-# model = SentenceTransformer('all-MiniLM-L6-v2')
-# # 1. הכנת רשימת הטקסטים (המרת העמודה לרשימה)
-# sentences = df_jobs['description_text'].str.lower().tolist()
-
-# # 2. יצירת הוקטורים בבת אחת (יעיל פי כמה וכמה)
-# # נשתמש ב-convert_to_numpy=True כי SQLite ממילא צריך Bytes/Numpy
-# embeddings = model.encode(sentences, show_progress_bar=True, convert_to_numpy=True)
+# 2. יצירת הוקטורים בבת אחת (יעיל פי כמה וכמה)
+# נשתמש ב-convert_to_numpy=True כי SQLite ממילא צריך Bytes/Numpy
+embeddings = model.encode(sentences, show_progress_bar=True, convert_to_numpy=True)
 
 # # 3. הכנסה ל-DataFrame - פשוט משבצים את המערך שחזר
 # # כל שורה במערך הופכת לתא בעמודה
@@ -194,6 +201,3 @@ conn.close()
 #         row['embedding'] = job_emb
        
     
-   
-
-

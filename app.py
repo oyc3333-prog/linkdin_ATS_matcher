@@ -4,6 +4,7 @@ import sqlite3
 import pandas as pd
 import spacy
 import time
+import numpy as np
 from sentence_transformers import SentenceTransformer, util
 
 
@@ -236,6 +237,7 @@ def ats_matcher(resume_text, jobs_df):
     resume_processed = resume_text.lower()
     resume_keywords = extract_keywords(resume_text)
     cv_gold_skills = resume_keywords & gold_skills
+    resume_emb = model.encode(resume_processed, convert_to_tensor=True)
     
     results = []
     for idx, row in jobs_df.iterrows():
@@ -243,11 +245,21 @@ def ats_matcher(resume_text, jobs_df):
         job_title = row['job_title']
         
         # סמנטיקה
-        resume_emb = model.encode(resume_processed, convert_to_tensor=True)
-        job_emb = model.encode(job_desc.lower(), convert_to_tensor=True)
-        similarity = util.cos_sim(resume_emb, job_emb).item()
-        match_score = similarity * 100
-        
+        # job_emb = model.encode(job_desc.lower(), convert_to_tensor=True)
+       # --- תיקון חלק הסמנטיקה בתוך הלולאה ---
+        if pd.notna(row["bert_vector"]):
+            try:
+                # טעינת הוקטור מהבייטים
+                job_emb = np.frombuffer(row["bert_vector"], dtype=np.float32)
+                
+                # חישוב הדמיון
+                similarity = util.cos_sim(resume_emb, job_emb).item()
+                match_score = similarity * 100
+            except Exception as e:
+                # הגנה למקרה שה-blob פגום
+                match_score = 0
+        else:
+            match_score = 0
         # סקילס
         job_keywords = extract_keywords(job_desc)
         job_gold_skills = job_keywords & gold_skills
@@ -255,7 +267,7 @@ def ats_matcher(resume_text, jobs_df):
         skill_percentage = (len(matched_gold) / len(job_gold_skills)) * 100 if job_gold_skills else 0
         
         # חישוב ציון משולב (הנוסחה שלך)
-        combined_score = 25 + (0.6 * match_score + 0.4 * skill_percentage) * 0.75
+        combined_score = 35 + (0.6 * match_score + 0.4 * skill_percentage) * 0.65
         
         # קנס בכירות
         is_senior_job = any(word in job_title.lower() for word in seniority_keywords)
@@ -291,12 +303,12 @@ if uploaded_file:
     
     cleaned_cv = clean_text(raw_text)
     
-    with st.expander("📄 צפה בטקסט שחולץ"):
-        st.text_area("", cleaned_cv, height=150)
+    with st.expander("📄 קורות החיים שלך:"):
+        st.text_area("", cleaned_cv, height=450)
 
     # טעינת משרות מה-DB
     conn = sqlite3.connect('linkedin_jobs.db')
-    jobs_df = pd.read_sql_query("SELECT job_title, company_name, description_text, URL, location, search_date FROM jobs WHERE description_text IS NOT NULL LIMIT 100", conn)
+    jobs_df = pd.read_sql_query("SELECT job_title, company_name, description_text, URL, location, search_date, bert_vector FROM jobs WHERE description_text IS NOT NULL LIMIT 100", conn)
     conn.close()
 
     if not jobs_df.empty:
