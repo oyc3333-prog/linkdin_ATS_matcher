@@ -7,7 +7,7 @@ from google.oauth2.service_account import Credentials # <--- שינוי כאן
 
 # 1. חיבור לבסיס הנתונים (נשאר אותו דבר)
 conn = sqlite3.connect('linkedin_jobs.db')
-df_jobs = pd.read_sql_query("SELECT * FROM jobs", conn)
+df_jobs = pd.read_sql_query("SELECT job_title, search_date, location, URL, company_name FROM jobs", conn)
 df_skills = pd.read_sql_query("SELECT * FROM skills_in_jobs", conn)
 conn.close()
 
