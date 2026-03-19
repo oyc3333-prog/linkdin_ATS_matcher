@@ -25,6 +25,11 @@ jobs:
       - name: Run Scraper
         run: python linkdin_scraper.py
 
+      - name: Upload to Google Sheets
+        env:
+          GCP_SERVICE_ACCOUNT_JSON: ${{ secrets.GCP_SERVICE_ACCOUNT_JSON }}
+        run: python upload_to_sheets.py
+        
       - name: Commit and Push changes
         run: |
           git config --global user.name "GitHub Action"
