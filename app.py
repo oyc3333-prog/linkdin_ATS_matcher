@@ -114,7 +114,7 @@ gold_skills = {
     "Strategic Partnership", "Value-based Selling", "Revenue Growth", "KPI Driven", "sales",
     # Programming Languages & Environments
     'python', 'sql', 'javascript', 'typescript', 'java', 'scala', 'c++', 'julia', 'rust', 
-    'r programming', 'golang', 'bash', 'powershell', 'vba', 'html5', 'css3', 'php', 'node.js', 
+    'r programming', 'golang', 'bash', 'powershell', 'vba', 'html5', 'css', 'php', 'node.js', 
     'pyspark', 'sas', 'matlab', 'apex', 'ruby', 'perl', 'solidity', 'linux', 'unix',
 
     # Data Science, ML & AI
