@@ -22,8 +22,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install requests beautifulsoup4 pandas sqlalchemy sentence_transformers gspread
 
-      - name: Run Scraper
-        run: python linkdin_scraper.py
+      
 
       - name: Upload to Google Sheets
         env:
