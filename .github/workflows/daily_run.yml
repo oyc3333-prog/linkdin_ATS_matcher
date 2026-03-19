@@ -20,7 +20,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install requests beautifulsoup4 pandas sqlalchemy
+          pip install requests beautifulsoup4 pandas sqlalchemy sentence_transformers
 
       - name: Run Scraper
         run: python linkdin_scraper.py
