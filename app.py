@@ -370,7 +370,7 @@ def ats_matcher(resume_text, jobs_df):
         combined_score = 30  + (0.2 * semantic_score + 0.5 * skill_score + 0.3 * category_score_value) * 0.7
         
         # קנס בכירות
-        is_senior_job = any(word in job_title.lower() for word in seniority_keywords)
+        is_senior_job = any(word in job_title.lower() for word in seniority_keywords or word in job_desc.lower() for word in seniority_keywords)
         is_cv_senior = any(word in resume_processed for word in seniority_keywords)
         if is_senior_job and not is_cv_senior:
             combined_score -= 35
