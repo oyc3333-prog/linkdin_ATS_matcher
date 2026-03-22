@@ -4,6 +4,7 @@ import sqlite3
 import pandas as pd
 import spacy
 import time
+import re
 import numpy as np
 from sentence_transformers import SentenceTransformer, util
 
@@ -228,6 +229,69 @@ junk_words = {
     'show', 'shows', 'showed', 'showing', 'display', 'displays', 'practical', 'practically',
     'internal', 'external', 'global', 'local', 'wide', 'broad', 'deep', 'deeply'
 }
+# הגדרת טקסונומיה היררכית של קטגוריות משרות עם מילות מפתח וסאב-קטגוריות
+job_taxonomy = {
+    "Data & BI": {
+        "keywords": ["data", "bi", "crm", "sap", "ml"],
+        "sub_categories": {
+            "Data Analyst": [ "data analyst", "tableau", "power bi", "looker", "product analyst", "business analyst"],
+            "Data Engineer": ["data engineer", "etl", "pipeline", "airflow", "bigquery", "redshift", "spark"],
+            "Data Science": ["scientist", "machine learning", "ml", "nlp", "deep learning", "researcher"],
+            "AI Engineer": ["ai engineer", "genai", "generative ai", "llm", "langchain", "openai", "rag"],
+            "Data Operations": ["operations", "ops"]
+        }
+    },
+    "Software Engineering": {
+        "keywords": ["software", "developer", "engineer", "fullstack", "backend", "frontend"],
+        "sub_categories": {
+            "Backend Dev": ["backend"],
+            "Frontend Dev": ["frontend", "front"],
+            "Fullstack Dev": ["fullstack", "full-stack", "full stack"],
+            "Mobile Dev": ["ios", "android", "mobile"]
+        }
+    },
+    "Cyber & IT": {
+        "keywords": ["cyber", "security", "it", "system", "cloud", "network", "infosec"],
+        "sub_categories": {
+            "Security Analyst": ["security analyst", "soc", "penetration", "pt", "grc", "ciso", "security analyst", "vulnerability"],
+            "DevOps": ["devops", "sre", "kubernetes", "docker", "terraform", "jenkins", "ci/cd"],
+            "IT & System Admin": ["it", "help desk", "support", "sysadmin", "system administrator", "network engineer"]
+        }
+    },
+    "Product & Design": {
+        "keywords": ["product", "manager", "designer", "graphic"],
+        "sub_categories": {
+            "Product Manager": ["product manager", "product owner", "po", "pm", "inbound", "outbound", "pmo", "project manager"],
+            "UX/UI Designer": ["ux", "ui", "product designer", "user experience", "user interface"],
+            "Graphic Designer": ["graphic", "motion", "illustrator", "photoshop", "creative designer"]
+        }
+    },
+    "Quality & QA": {
+        "keywords": ["qa", "testing", "quality", "test", "verification", "validation"],
+        "sub_categories": {
+            "QA Manual": ["manual"],
+            "QA Automation": ["automation", "sdet", "selenium", "playwright", "cypress", "aut"]
+        }
+    },
+    "Hardware": {
+        "keywords": ["hardware", "board", "electrical", "vlsi", "asic", "fpga", "chip", "rf"],
+        "sub_categories": {
+            "Hardware Engineer": ["hardware engineer", "board design", "circuit", "analog"],
+            "VLSI/Chip Design": ["vlsi", "asic", "fpga", "verification engineer", "rtl"],
+            "Electrical Engineer": ["electrical engineer", "power engineer", "rf engineer"]
+        }
+    },
+    "Business & Sales": {
+        "keywords": ["sales", "business development", "sdr", "bdr", "account", "success", "B2B"],
+        "sub_categories": {
+            "Sales / Account": ["account executive", "sales manager", "ae", "account manager"],
+            "SDR / BDR": ["sdr", "bdr", "business development representative", "lead generation"],
+            "Customer Success": ["customer success", "csm", "client success"]
+        }
+    }
+}
+
+
 
 # --- פונקציות לוגיקה (מותאמות) ---
 
@@ -242,41 +306,68 @@ def extract_keywords(text):
                 and token.lemma_ not in junk_words and len(token.lemma_) > 2}
     return keywords
 
+def get_category(text, taxonomy):
+    """פונקציית עזר לחיפוש קטגוריה ותת-קטגוריה בטקסט נתון"""
+    for category, content in taxonomy.items():
+        # בדיקת קטגוריה ראשית
+        cat_pattern = r'\b(' + '|'.join([re.escape(k) for k in content["keywords"]]) + r')\b'
+        if re.search(cat_pattern, text, re.IGNORECASE):
+            # אם נמצאה קטגוריה, נחפש תת-קטגוריה
+            for sub_cat, sub_keywords in content["sub_categories"].items():
+                sub_pattern = r'\b(' + '|'.join([re.escape(k) for k in sub_keywords]) + r')\b'
+                if re.search(sub_pattern, text, re.IGNORECASE):
+                    return category, sub_cat
+            # אם נמצאה קטגוריה אבל לא תת-קטגוריה ספציפית
+            return category, "General"
+    return None, None
+    
+
+def category_score(resume_category, resume_sub_category, job_category, job_sub_category):
+    if not resume_category == job_category:
+        return 0
+    if not job_sub_category == resume_sub_category:
+        return 50
+    return 100
+        
+    
+
 def ats_matcher(resume_text, jobs_df):
     resume_processed = resume_text.lower()
     resume_keywords = extract_keywords(resume_text)
     cv_gold_skills = resume_keywords & gold_skills
     resume_emb = model.encode(resume_processed, convert_to_tensor=True)
+    resume_category, resume_sub_category = get_category(resume_text, job_taxonomy)
     
     results = []
     for idx, row in jobs_df.iterrows():
         job_desc = row['description_text']
         job_title = row['job_title']
-        
-        # סמנטיקה
-        # job_emb = model.encode(job_desc.lower(), convert_to_tensor=True)
+        job_main_cat= row['main_category']
+        job_sub_cat= row['sub_category']
+        # חישוב ציון קטגוריה
+        category_score_value = category_score(resume_category, resume_sub_category, job_main_cat, job_sub_cat)
        # --- תיקון חלק הסמנטיקה בתוך הלולאה ---
         if pd.notna(row["bert_vector"]):
             try:
                 # טעינת הוקטור מהבייטים
                 job_emb = np.frombuffer(row["bert_vector"], dtype=np.float32)
                 
-                # חישוב הדמיון
+                # חישוב ציון סמנטי
                 similarity = util.cos_sim(resume_emb, job_emb).item()
-                match_score = similarity * 100
+                semantic_score = similarity * 100
             except Exception as e:
                 # הגנה למקרה שה-blob פגום
-                match_score = 0
+                semantic_score = 0
         else:
-            match_score = 0
-        # סקילס
+            semantic_score = 0
+        #חישוב ציון סקילים
         job_keywords = extract_keywords(job_desc)
         job_gold_skills = job_keywords & gold_skills
         matched_gold = cv_gold_skills & job_gold_skills
-        skill_percentage = (len(matched_gold) / len(job_gold_skills)) * 100 if job_gold_skills else 0
+        skill_score = (len(matched_gold) / len(job_gold_skills)) * 100 if job_gold_skills else 0
         
         # חישוב ציון משולב (הנוסחה שלך)
-        combined_score = 40 + (0.6 * match_score + 0.4 * skill_percentage) * 0.6
+        combined_score = 30 + (0.3 * semantic_score + 0.5 * skill_score + 0.2 * category_score_value) * 0.7
         
         # קנס בכירות
         is_senior_job = any(word in job_title.lower() for word in seniority_keywords)
@@ -317,7 +408,7 @@ if uploaded_file:
 
     # טעינת משרות מה-DB
     conn = sqlite3.connect('linkedin_jobs.db')
-    jobs_df = pd.read_sql_query("SELECT job_title, company_name, description_text, URL, location, search_date, bert_vector FROM jobs WHERE description_text IS NOT NULL LIMIT 100", conn)
+    jobs_df = pd.read_sql_query("SELECT job_title, company_name, description_text, URL, location, search_date, bert_vector, main_category, sub_category FROM jobs WHERE description_text IS NOT NULL LIMIT 100", conn)
     conn.close()
 
     if not jobs_df.empty:
