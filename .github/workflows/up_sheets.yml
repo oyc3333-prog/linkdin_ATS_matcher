@@ -1,4 +1,4 @@
-name: LinkedIn Daily Scraper
+name: up to sheets
 
 on:
   schedule:
