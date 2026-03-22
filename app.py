@@ -251,11 +251,11 @@ job_taxonomy = {
         }
     },
     "Cyber & IT": {
-        "keywords": ["cyber", "security", "it", "system", "cloud", "network", "infosec"],
+        "keywords": ["cyber", "security", "it", "system", "cloud", "network", "infosec", "support", "service"],
         "sub_categories": {
             "Security Analyst": ["security analyst", "soc", "penetration", "pt", "grc", "ciso", "security analyst", "vulnerability"],
             "DevOps": ["devops", "sre", "kubernetes", "docker", "terraform", "jenkins", "ci/cd"],
-            "IT & System Admin": ["it", "help desk", "support", "sysadmin", "system administrator", "network engineer"]
+            "IT & System Admin": ["it", "help desk", "support", "sysadmin", "system administrator", "network engineer", "support", "service"]
         }
     },
     "Product & Design": {
@@ -324,9 +324,9 @@ def get_category(text, taxonomy):
 
 def category_score(resume_category, resume_sub_category, job_category, job_sub_category):
     if not resume_category == job_category:
-        return 0
+        return -200
     if not job_sub_category == resume_sub_category:
-        return 50
+        return 0
     return 100
         
     
@@ -367,13 +367,15 @@ def ats_matcher(resume_text, jobs_df):
         skill_score = (len(matched_gold) / len(job_gold_skills)) * 100 if job_gold_skills else 0
         
         # חישוב ציון משולב (הנוסחה שלך)
-        combined_score = 30 + (0.3 * semantic_score + 0.5 * skill_score + 0.2 * category_score_value) * 0.7
+        combined_score = 30  + (0.2 * semantic_score + 0.5 * skill_score + 0.3 * category_score_value) * 0.7
         
         # קנס בכירות
         is_senior_job = any(word in job_title.lower() for word in seniority_keywords)
         is_cv_senior = any(word in resume_processed for word in seniority_keywords)
         if is_senior_job and not is_cv_senior:
             combined_score -= 35
+        else: 
+            combined_score += 15
 
         results.append({
             'job_title': job_title,
@@ -408,16 +410,27 @@ if uploaded_file:
 
     # טעינת משרות מה-DB
     conn = sqlite3.connect('linkedin_jobs.db')
-    jobs_df = pd.read_sql_query("SELECT job_title, company_name, description_text, URL, location, search_date, bert_vector, main_category, sub_category FROM jobs WHERE description_text IS NOT NULL LIMIT 100", conn)
+    resume_category, resume_sub_category = get_category(cleaned_cv, job_taxonomy)
+    
+
+    query = "SELECT * FROM jobs WHERE main_category = ?"
+    
+    # אם לא זוהתה קטגוריה (Other), נמשוך את הכל כגיבוי
+    if resume_category == "Other":
+        query = "SELECT * FROM jobs"
+        jobs_df = pd.read_sql_query(query, conn)
+    else:
+        jobs_df = pd.read_sql_query(query, conn, params=(resume_category,))
+
     conn.close()
 
     if not jobs_df.empty:
         st.write("---")
         st.subheader("המשרות המתאימות ביותר עבורך:")
         
-        with st.spinner('מחשב התאמה סמנטית...'):
+        with st.spinner("...מוצא לך את המשרות המתאימות ביותר בשבילך"):
             results_df = ats_matcher(cleaned_cv, jobs_df)
-
+        st.subheader("נמצאו {} משרות מתאימות עבורך".format(len(results_df)))
         for _, row in results_df.iterrows():
             # יצירת כרטיס משרה בסגנון לינקדין
             with st.container():
@@ -431,7 +444,7 @@ if uploaded_file:
                     st.caption("<p style='text-align:center;'>Match Score</p>", unsafe_allow_html=True)
                     if row['missing_skills']:
                         st.markdown(f"<small>Missing skills: {', '.join(row['missing_skills'])}</small>", unsafe_allow_html=True)
-                
+                        st.write(f"Total jobs in DB: {len(jobs_df)}")
                 with c2:
                     st.markdown(f"### {row['job_title']}")
                     st.markdown(f"**{row['company']}**")
