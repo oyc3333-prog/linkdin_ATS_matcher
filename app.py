@@ -99,7 +99,7 @@ model, nlp = load_heavy_models()
 # --- מילות מפתח (מהקוד שלך) ---
 seniority_keywords = {
     'senior', 'sr', 'lead', 'leader', 'leading', 'manager', 'management', 
-    'principal', 'head', 'vp', 'director', 'expert', 'staff', 'team lead', 'c++', 'cloud', 'cobol', 'backend', 'frontend', 'full stack', 'architect', 'solution architect', 'data architect', 'chief', 'officer', 'cto', 'ceo'
+    'principal', 'head', 'vp', 'director', 'expert', 'staff', 'team lead', 'c++', 'cloud', 'cobol', 'backend', 'frontend', 'full stack', 'architect', 'solution architect', 'data architect', 'chief', 'officer', 'cto', 'ceo', 'qa'
 }
 # Define gold skills (prioritized in gap analysis)
 gold_skills = {

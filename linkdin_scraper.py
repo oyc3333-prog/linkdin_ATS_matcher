@@ -7,6 +7,7 @@ import random
 import time
 import sqlite3
 import numpy as np
+import re
 from sentence_transformers import SentenceTransformer
 model = SentenceTransformer('all-MiniLM-L6-v2')
 
@@ -178,26 +179,134 @@ conn = sqlite3.connect('linkedin_jobs.db')
 # אם אתה רוצה להוסיף לקיים, שנה ל-'append'
 jobs_df.to_sql('jobs', conn, if_exists='append', index=False)
 
-# 5. סגירת החיבור
-conn.close()
-
-# 1. הכנת רשימת הטקסטים (המרת העמודה לרשימה)
-sentences = jobs_df['description_text'].str.lower().tolist()
-
-# 2. יצירת הוקטורים בבת אחת (יעיל פי כמה וכמה)
-# נשתמש ב-convert_to_numpy=True כי SQLite ממילא צריך Bytes/Numpy
-embeddings = model.encode(sentences, show_progress_bar=True, convert_to_numpy=True)
-
-# # 3. הכנסה ל-DataFrame - פשוט משבצים את המערך שחזר
-# # כל שורה במערך הופכת לתא בעמודה
-# df_jobs['embedding'] = list(embeddings)
 
 
-# %%
-# df_jobs['embedding'] = None
-# for  row in jobs_df.iterrows():
-#         job_desc = row['description_text']
-#         job_emb = model.encode(job_desc.lower(), convert_to_tensor=True)
-#         row['embedding'] = job_emb
-       
+conn = sqlite3.connect('linkedin_jobs.db')
+cursor = conn.cursor()
+
+# 1. יצירת טבלה זמנית עם נתונים ייחודיים בלבד לפי ה-URL
+# אנחנו משתמשים ב-GROUP BY כדי לוודא שכל URL מופיע רק פעם אחת
+cursor.execute("""
+    CREATE TABLE jobs_backup AS 
+    SELECT * FROM jobs 
+    GROUP BY URL
+""")
+
+# 2. מחיקת הטבלה המקורית (המלוכלכת)
+cursor.execute("DROP TABLE jobs")
+
+# 3. שינוי שם הטבלה הזמנית לשם המקורי
+cursor.execute("ALTER TABLE jobs_backup RENAME TO jobs")
+
+
+print("ה-DB נוקה מכפילויות בהצלחה באמצעות SQL!")
+
+
+
+gold_skills = {
+
+    #sales
+    "Cold Calling", "Lead Generation", "Outbound Prospecting", "CRM Management",
+    "Salesforce", "HubSpot", "B2B SaaS", "Pipeline Management", "Quota Attainment",
+    "Customer Acquisition", "Relationship Building", "Negotiation", "Closing Deals",
+    "Sales Cycle", "GTM Strategy", "Market Research", "Product Demo",
+    "Account Management", "Objection Handling", "Inbound Leads", "Sales Funnel",
+    "Business Development", "SDR", "BDR", "Hunter Mentality", "Presentation Skills",
+    "Strategic Partnership", "Value-based Selling", "Revenue Growth", "KPI Driven", "sales",
+    # Programming Languages & Environments
+    'python', 'sql', 'javascript', 'typescript', 'java', 'scala', 'c++', 'julia', 'rust', 
+    'r programming', 'golang', 'bash', 'powershell', 'vba', 'html5', 'css', 'php', 'node.js', 
+    'pyspark', 'sas', 'matlab', 'apex', 'ruby', 'perl', 'solidity', 'linux', 'unix', 'QA', 'testing', 'automation testing', 'manual testing', 'selenium', 'cypress', 'jest',
+
+    # Data Science, ML & AI
+    'pandas', 'numpy', 'scikit-learn', 'sklearn', 'tensorflow', 'keras', 'pytorch', 'xgboost', 
+    'lightgbm', 'catboost', 'statsmodels', 'scipy', 'nltk', 'spacy', 'gensim', 'transformers', 
+    'huggingface', 'opencv', 'k-means', 'random forest', 'gradient boosting', 'neural networks', 
+    'deep learning', 'reinforcement learning', 'computer vision', 'natural language processing', 
+    'nlp', 'llm', 'langchain', 'rag', 'prompt engineering', 'explainable ai', 'xai',
+
+    # Databases & Storage
+    'postgresql', 'mysql', 'mongodb', 'redis', 'elasticsearch', 'cassandra', 'oracle db', 
+    'sql server', 'sqlite', 'mariadb', 'dynamodb', 'snowflake', 'bigquery', 'redshift', 
+    'teradata', 'neo4j', 'cosmosdb', 'influxdb', 'clickhouse', 'presto', 'trino', 'hive', 
+    'hbase', 'nosql', 'rdbms', 'schema-on-read', 'schema-on-write',
+
+    # Visualization & BI
+    'tableau', 'power bi', 'looker', 'google data studio', 'qlikview', 'qliksense', 
+    'matplotlib', 'seaborn', 'plotly', 'd3.js', 'grafana', 'kibana', 'superset', 'dash', 
+    'streamlit', 'microstrategy', 'sap businessobjects', 'dax', 'power query',
+
+    # Data Engineering & ETL
+    'apache airflow', 'dbt', 'apache kafka', 'apache spark', 'databricks', 'talend', 
+    'informatica', 'pentaho', 'stitch', 'fivetran', 'alteryx', 'apache nifi', 'hadoop', 
+    'mapreduce', 'etl', 'elt', 'data pipeline', 'data warehouse', 'data lake', 'data mesh', 
+    'batch processing', 'stream processing', 'airflow',
+
+    # Cloud & DevOps
+    'aws', 'azure', 'google cloud platform', 'gcp', 'amazon s3', 'ec2', 'lambda', 
+    'sagemaker', 'docker', 'kubernetes', 'terraform', 'ansible', 'jenkins', 'git', 
+    'github', 'gitlab', 'bitbucket', 'ci/cd', 'serverless', 'microservices',
+
+    # Statistics & Math
+    'linear regression', 'logistic regression', 'hypothesis testing', 'a/b testing', 
+    'bayesian statistics', 'probability theory', 'linear algebra', 'calculus', 
+    'optimization', 'time series analysis', 'forecasting', 'clustering', 
+    'dimension reduction', 'pca', 'anova', 'monte carlo simulation', 'statistics',
+
+    # Product, Business & Analysis
+    'kpis', 'conversion rate', 'churn analysis', 'retention', 'ltv', 'cac', 
+    'customer segmentation', 'funnel analysis', 'market basket analysis', 'cohort analysis', 
+    'roi', 'seo', 'sem', 'google analytics', 'amplitude', 'mixpanel', 'segment', 
+    'crm', 'salesforce', 'hubspot', 'strategic decisions', 'actionable insights',
+
+    # Development & Architecture
+    'rest api', 'graphql', 'soap', 'json', 'xml', 'web scraping', 'selenium', 
+    'beautifulsoup', 'oauth', 'jwt', 'agile', 'scrum', 'kanban', 'jira', 'confluence', 
+    'unit testing', 'pytest', 'integration testing', 'regex', 'excel vba', 
+    'object-oriented programming', 'oop', 'functional programming', 'distributed systems',
+    'multi-threading', 'parallel computing', 'microservices architecture',
+
+    # Specialized Data Skills
+    'anomaly detection', 'recommendation systems', 'graph theory', 'decision trees', 
+    'support vector machines', 'svm', 'ensemble learning', 'bagging', 'boosting', 
+    'data normalization', 'feature engineering', 'hyperparameter tuning', 
+    'cross validation', 'overfitting', 'underfitting', 'data governance', 
+    'data privacy', 'gdpr', 'cybersecurity', 'blockchain', 'data mining',
+    'exploratory data analysis', 'eda', 'data quality', 'data integrity'
+}
+
+# 3. פונקציית חילוץ סקילים מתיאור המשרה
+def extract_skills(description, skills_set):
+    if not description:
+        return []
     
+    found_skills = []
+    desc_lower = description.lower()
+    
+    for skill in skills_set:
+        skill_lower = skill.lower()
+        # שימוש ב-Regex לחיפוש מילה שלמה בלבד (מניעת התאמות חלקיות)
+        pattern = r'\b' + re.escape(skill_lower) + r'\b'
+        if re.search(pattern, desc_lower):
+            found_skills.append(skill)
+            
+    return found_skills
+
+# 4. מעבר על המשרות ויצירת רשימת הקשרים
+extracted_data = []
+for _, row in jobs_df.iterrows():
+    url = row['URL']
+    description = row['description_text']
+    
+    found = extract_skills(description, gold_skills)
+    for skill in found:
+        extracted_data.append({'URL': url, 'skill': skill})
+
+# 5. שמירת התוצאות לטבלה ב-DB
+skills_in_jobs_df = pd.DataFrame(extracted_data)
+skills_in_jobs_df.to_sql('skills_in_jobs', conn, if_exists='append', index=False)
+
+conn.commit()
+conn.close()
+print(f"Extraction complete! Found {len(skills_in_jobs_df)} skill matches.")
+skills_in_jobs_df
