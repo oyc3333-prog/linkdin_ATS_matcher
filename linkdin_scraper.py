@@ -208,7 +208,7 @@ job_taxonomy = {
             "Graphic Designer": ["graphic", "motion", "illustrator", "photoshop", "creative designer"]
         }
     },
-    "Quality & QA": {
+    "QA": {
         "keywords": ["qa", "testing", "quality", "test", "verification", "validation"],
         "sub_categories": {
             "QA Manual": ["manual"],
