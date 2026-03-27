@@ -273,9 +273,6 @@ conn = sqlite3.connect('linkedin_jobs.db')
 # הרצה על ה-Dataframe
 jobs_df[['main_category', 'sub_category']] = jobs_df.apply(classify_job_hierarchical, axis=1)
 jobs_df.info()
-j
-
-
 
 # %%
 # 3. התחברות ל-DB (יוצר את הקובץ אם הוא לא קיים)
@@ -308,7 +305,7 @@ cursor.execute("ALTER TABLE jobs_backup RENAME TO jobs")
 
 print("ה-DB נוקה מכפילויות בהצלחה באמצעות SQL!")
 
-
+print("all jobs added to DB, now extracting skills...")
 
 gold_skills = {
 
@@ -425,124 +422,3 @@ skills_in_jobs_df
 
 
 
-
-# 1. חיבור לבסיס הנתונים
-conn = sqlite3.connect('linkedin_jobs.db')
-
-# 2. משיכת כל הנתונים לתוך DataFrame
-jobs_df = pd.read_sql_query("SELECT * FROM jobs", conn)
-
-# 3. סגירת החיבור (חשוב!)
-conn.close()
-
-# הצצה לנתונים
-print(jobs_df.head())
-
-
-job_taxonomy = {
-    "Data & BI": {
-        "keywords": ["data", "bi", "crm", "sap", "ml"],
-        "sub_categories": {
-            "Data Analyst": [ "data analyst", "tableau", "power bi", "looker", "product analyst", "business analyst"],
-            "Data Engineer": ["data engineer", "etl", "pipeline", "airflow", "bigquery", "redshift", "spark"],
-            "Data Science": ["scientist", "machine learning", "ml", "nlp", "deep learning", "researcher"],
-            "AI Engineer": ["ai engineer", "genai", "generative ai", "llm", "langchain", "openai", "rag"],
-            "Data Operations": ["operations", "ops"]
-        }
-    },
-    "Software Engineering": {
-        "keywords": ["software", "developer", "engineer", "fullstack", "backend", "frontend"],
-        "sub_categories": {
-            "Backend Dev": ["backend"],
-            "Frontend Dev": ["frontend", "front"],
-            "Fullstack Dev": ["fullstack", "full-stack", "full stack"],
-            "Mobile Dev": ["ios", "android", "mobile"]
-        }
-    },
-    "Cyber & IT": {
-        "keywords": ["cyber", "security", "it", "system", "cloud", "network", "infosec"],
-        "sub_categories": {
-            "Security Analyst": ["security analyst", "soc", "penetration", "pt", "grc", "ciso", "security analyst", "vulnerability"],
-            "DevOps": ["devops", "sre", "kubernetes", "docker", "terraform", "jenkins", "ci/cd"],
-            "IT & System Admin": ["it", "help desk", "support", "sysadmin", "system administrator", "network engineer"]
-        }
-    },
-    "Product & Design": {
-        "keywords": ["product", "manager", "designer", "graphic"],
-        "sub_categories": {
-            "Product Manager": ["product manager", "product owner", "po", "pm", "inbound", "outbound", "pmo", "project manager"],
-            "UX/UI Designer": ["ux", "ui", "product designer", "user experience", "user interface"],
-            "Graphic Designer": ["graphic", "motion", "illustrator", "photoshop", "creative designer"]
-        }
-    },
-    "Quality & QA": {
-        "keywords": ["qa", "testing", "quality", "test", "verification", "validation"],
-        "sub_categories": {
-            "QA Manual": ["manual"],
-            "QA Automation": ["automation", "sdet", "selenium", "playwright", "cypress", "aut"]
-        }
-    },
-    "Hardware": {
-        "keywords": ["hardware", "board", "electrical", "vlsi", "asic", "fpga", "chip", "rf"],
-        "sub_categories": {
-            "Hardware Engineer": ["hardware engineer", "board design", "circuit", "analog"],
-            "VLSI/Chip Design": ["vlsi", "asic", "fpga", "verification engineer", "rtl"],
-            "Electrical Engineer": ["electrical engineer", "power engineer", "rf engineer"]
-        }
-    },
-    "Business & Sales": {
-        "keywords": ["sales", "business development", "sdr", "bdr", "account", "success", "B2B"],
-        "sub_categories": {
-            "Sales / Account": ["account executive", "sales manager", "ae", "account manager"],
-            "SDR / BDR": ["sdr", "bdr", "business development representative", "lead generation"],
-            "Customer Success": ["customer success", "csm", "client success"]
-        }
-    }
-}
-
-
-import re
-
-def get_match(text, taxonomy):
-    """פונקציית עזר לחיפוש קטגוריה ותת-קטגוריה בטקסט נתון"""
-    for category, content in taxonomy.items():
-        # בדיקת קטגוריה ראשית
-        cat_pattern = r'\b(' + '|'.join([re.escape(k) for k in content["keywords"]]) + r')\b'
-        if re.search(cat_pattern, text, re.IGNORECASE):
-            # אם נמצאה קטגוריה, נחפש תת-קטגוריה
-            for sub_cat, sub_keywords in content["sub_categories"].items():
-                sub_pattern = r'\b(' + '|'.join([re.escape(k) for k in sub_keywords]) + r')\b'
-                if re.search(sub_pattern, text, re.IGNORECASE):
-                    return category, sub_cat
-            # אם נמצאה קטגוריה אבל לא תת-קטגוריה ספציפית
-            return category, "General"
-    return None, None
-
-def classify_job_hierarchical(row):
-    title = str(row['job_title']).lower()
-    description = str(row['description_text']).lower()
-    
-    # ניסיון 1: חיפוש בטייטל (הכי מדויק)
-    category, sub_category = get_match(title, job_taxonomy)
-    
-    # ניסיון 2: אם לא נמצא בטייטל, מחפשים בתיאור (גיבוי)
-    if not category or not sub_category:
-        category, sub_category = get_match(description, job_taxonomy)
-        
-    # אם עדיין לא נמצא כלום
-    if not category:
-        category, sub_category = "Other", "General"
-        
-    return pd.Series([category, sub_category])
-
-# 1. יצירת חיבור לבסיס הנתונים
-conn = sqlite3.connect('linkedin_jobs.db')
-# הרצה על ה-Dataframe
-jobs_df[['main_category', 'sub_category']] = jobs_df.apply(classify_job_hierarchical, axis=1)
-jobs_df.info()
-jobs_df.to_sql('jobs', conn, if_exists='replace', index=False)
-
-# 3. סגירת החיבור
-conn.close()
-
-print("The table 'jobs' has been successfully updated and replaced.")
