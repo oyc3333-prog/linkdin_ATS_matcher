@@ -256,8 +256,9 @@ def resume_classification(resume_text):
 
 
 
-    my_categories = { "Data & BI": {
-            "keywords": ["data", "bi", "crm", "sap", "ml"],
+    my_categories = { 
+        "Data & BI": {
+            "keywords": ["data", "bi", "crm", "sap", "ml", "analytics"],
             "sub_categories": {
                 "Data Analyst": [ "data analyst", "tableau", "power bi", "looker", "product analyst", "business analyst"],
                 "Data Engineer": ["data engineer", "etl", "pipeline", "airflow", "bigquery", "redshift", "spark"],
@@ -267,24 +268,24 @@ def resume_classification(resume_text):
             }
         },
         "Software Engineering": {
-            "keywords": ["software", "developer", "engineer", "fullstack", "backend", "frontend"],
+            "keywords": ["software", "developer", "engineer", "fullstack", "backend", "frontend", "programming"],
             "sub_categories": {
-                "Backend Dev": ["backend"],
-                "Frontend Dev": ["frontend", "front"],
+                "Backend Dev": ["backend", "backend developer"],
+                "Frontend Dev": ["frontend", "front", "frontend developer"],
                 "Fullstack Dev": ["fullstack", "full-stack", "full stack"],
-                "Mobile Dev": ["ios", "android", "mobile"]
+                "Mobile Dev": ["ios", "android", "mobile", "flutter"]
             }
         },
         "Cyber & IT": {
             "keywords": ["cyber", "security", "it", "system", "cloud", "network", "infosec"],
             "sub_categories": {
-                "Security Analyst": ["security analyst", "soc", "penetration", "pt", "grc", "ciso", "security analyst", "vulnerability"],
+                "Security Analyst": ["security analyst", "soc", "penetration", "pt", "grc", "ciso", "vulnerability"],
                 "DevOps": ["devops", "sre", "kubernetes", "docker", "terraform", "jenkins", "ci/cd"],
                 "IT & System Admin": ["it", "help desk", "support", "sysadmin", "system administrator", "network engineer"]
             }
         },
         "Product & Design": {
-            "keywords": ["product", "manager", "designer", "graphic"],
+            "keywords": ["product", "manager", "designer", "graphic", "design"],
             "sub_categories": {
                 "Product Manager": ["product manager", "product owner", "po", "pm", "inbound", "outbound", "pmo", "project manager"],
                 "UX/UI Designer": ["ux", "ui", "product designer", "user experience", "user interface"],
@@ -298,20 +299,52 @@ def resume_classification(resume_text):
                 "QA Automation": ["automation", "sdet", "selenium", "playwright", "cypress", "aut"]
             }
         },
-        "Hardware": {
-            "keywords": ["hardware", "board", "electrical", "vlsi", "asic", "fpga", "chip", "rf"],
+        "Hardware & Mechanical": {
+            "keywords": ["hardware", "board", "electrical", "vlsi", "asic", "fpga", "chip", "rf", "mechanical", "engineer", "technician", "maintenance"],
             "sub_categories": {
                 "Hardware Engineer": ["hardware engineer", "board design", "circuit", "analog"],
-                "VLSI/Chip Design": ["vlsi", "asic", "fpga", "verification engineer", "rtl"],
-                "Electrical Engineer": ["electrical engineer", "power engineer", "rf engineer"]
+                "Mechanical Engineer": ["mechanical engineer", "mechanical technician", "machine"],
+                "Electrical Engineer": ["electrical engineer", "power engineer", "rf engineer"],
+                "Maintenance Technician": ["maintenance technician", "maintenance", "technician", "repair"],
+                "VLSI/Chip Design": ["vlsi", "asic", "fpga", "verification engineer", "rtl"]
             }
         },
         "Business & Sales": {
-            "keywords": ["sales", "business development", "sdr", "bdr", "account", "success", "B2B"],
+            "keywords": ["sales", "business development", "sdr", "bdr", "account", "success", "B2B", "sales manager"],
             "sub_categories": {
                 "Sales / Account": ["account executive", "sales manager", "ae", "account manager"],
                 "SDR / BDR": ["sdr", "bdr", "business development representative", "lead generation"],
                 "Customer Success": ["customer success", "csm", "client success"]
+            }
+        },
+        "Operations & Logistics": {
+            "keywords": ["operations", "logistics", "warehouse", "supply chain", "inventory", "fulfillment"],
+            "sub_categories": {
+                "Warehouse Operations": ["warehouse", "picker", "packer", "fulfillment"],
+                "Supply Chain": ["supply chain", "procurement", "logistics"],
+                "Operations Manager": ["operations manager", "operations coordinator"]
+            }
+        },
+        "Retail & Customer Service": {
+            "keywords": ["retail", "store", "customer service", "sales associate", "cashier", "shop", "commercial"],
+            "sub_categories": {
+                "Store Manager": ["store manager", "retail manager", "shop manager"],
+                "Sales Associate": ["sales associate", "retail associate", "cashier"],
+                "Customer Service": ["customer service", "customer support", "call center"]
+            }
+        },
+        "HR & Administration": {
+            "keywords": ["hr", "human resources", "recruitment", "admin", "administrative"],
+            "sub_categories": {
+                "HR Specialist": ["hr", "recruiter", "recruitment", "talent acquisition"],
+                "Administrator": ["admin", "administrative", "office administrator"]
+            }
+        },
+        "Finance & Accounting": {
+            "keywords": ["finance", "accountant", "accounting", "bookkeeper", "financial"],
+            "sub_categories": {
+                "Accountant": ["accountant", "bookkeeper", "financial analyst"],
+                "Finance Manager": ["finance manager", "financial manager", "controller"]
             }
         }
     }
@@ -320,25 +353,33 @@ def resume_classification(resume_text):
 
 
     # 3. הגדרת ה-Prompt לסיווג
-    template = """
-    You are a career expert. Categorize the cv.
-    provide:
-    1. Category (High-level field)
-    2. Sub-category (Specific niche)
-    3. Seniority Level (intern, Junior, Senior, Lead)
+    template = """You are an expert career classification system. Your task is to classify careers based on resume/CV content.
 
-    clasificate jobs categories only from that category list!
-        {my_categories}
-    clasificate seniority level only to: intern, junior, senior, lead
+IMPORTANT RULES:
+1. Analyze the resume carefully for job titles, experience, and skills
+2. Match ONLY from the provided categories list
+3. If no clear match exists, use "Other"
+4. Be precise - the category should reflect the candidate's primary expertise
 
-        Return the results as a JSON object fit to 
-    {format_instructions}   
-    .
+CLASSIFICATION CATEGORIES:
+{my_categories}
 
-    cvs to classify:
-    {resume_text}
+SENIORITY LEVELS TO USE: intern, junior, senior, lead
+- Determine based on years of experience and job titles shown in resume
 
-    """
+RESUME TEXT TO CLASSIFY:
+{resume_text}
+
+Return ONLY a valid JSON object with this exact structure:
+{{
+  "URL": "resume_classification",
+  "main_category": "category name from list",
+  "sub_category": "subcategory name from list",
+  "level": "intern|junior|senior|lead"
+}}
+
+CRITICAL: Return ONLY JSON, no other text.
+"""
 
     
 
@@ -356,9 +397,9 @@ def resume_classification(resume_text):
         })
 
         # 2. חילוץ הערכים למשתנים בודדים
-        resume_main_category = result.get('main_category')
-        resume_sub_category = result.get('sub_category')
-        resume_level = result.get('level')
+        resume_main_category = result.get('main_category', 'Other')
+        resume_sub_category = result.get('sub_category', 'Other')
+        resume_level = result.get('level', 'junior')
 
         # הדפסה לבדיקה
         print(f"--- Classification Results ---")
@@ -482,14 +523,14 @@ if uploaded_file:
     resume_level, resume_category, resume_sub_category = resume_classification(cleaned_cv)
     
 
-    query = "SELECT * FROM jobs WHERE sub_category = ?"
+    query = "SELECT * FROM jobs WHERE main_category = ?"
     print(f"resume category is {resume_category}")
     # אם לא זוהתה קטגוריה (Other), נמשוך את הכל כגיבוי
     if resume_category == "Other":
         query = "SELECT * FROM jobs"
         jobs_df = pd.read_sql_query(query, conn)
     else:
-        jobs_df = pd.read_sql_query(query, conn, params=(resume_sub_category,))
+        jobs_df = pd.read_sql_query(query, conn, params=(resume_category))
 
     conn.close()
 
@@ -540,25 +581,4 @@ st.markdown("<style>.stApp { background-color: white; }</style>", unsafe_allow_h
 
 
 
-
-import sqlite3
-import pandas as pd
-
-
-
-# 1. התחברות ל-DB (תוודא שהנתיב נכון לקובץ שלך)
-conn = sqlite3.connect("jobs.db") 
-
-# 2. שאילתה לשליפת הטייטלים והקטגוריות
-# שים לב: השתמשתי בשמות העמודות שמופיעים בשגיאות הקודמות שלך
-query = """
-SELECT job_title, main_category, sub_category 
-FROM jobs 
-LIMIT 100
-"""
-
-
-df = pd.read_sql_query(query, conn)
-df.head(50)
-conn.close()
 

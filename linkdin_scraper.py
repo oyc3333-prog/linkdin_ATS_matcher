@@ -254,8 +254,9 @@ llm = ChatGoogleGenerativeAI(
     temperature=0
 )
 
-my_categories = { "Data & BI": {
-        "keywords": ["data", "bi", "crm", "sap", "ml"],
+my_categories = { 
+    "Data & BI": {
+        "keywords": ["data", "bi", "crm", "sap", "ml", "analytics"],
         "sub_categories": {
             "Data Analyst": [ "data analyst", "tableau", "power bi", "looker", "product analyst", "business analyst"],
             "Data Engineer": ["data engineer", "etl", "pipeline", "airflow", "bigquery", "redshift", "spark"],
@@ -265,24 +266,24 @@ my_categories = { "Data & BI": {
         }
     },
     "Software Engineering": {
-        "keywords": ["software", "developer", "engineer", "fullstack", "backend", "frontend"],
+        "keywords": ["software", "developer", "engineer", "fullstack", "backend", "frontend", "programming"],
         "sub_categories": {
-            "Backend Dev": ["backend"],
-            "Frontend Dev": ["frontend", "front"],
+            "Backend Dev": ["backend", "backend developer"],
+            "Frontend Dev": ["frontend", "front", "frontend developer"],
             "Fullstack Dev": ["fullstack", "full-stack", "full stack"],
-            "Mobile Dev": ["ios", "android", "mobile"]
+            "Mobile Dev": ["ios", "android", "mobile", "flutter"]
         }
     },
     "Cyber & IT": {
         "keywords": ["cyber", "security", "it", "system", "cloud", "network", "infosec"],
         "sub_categories": {
-            "Security Analyst": ["security analyst", "soc", "penetration", "pt", "grc", "ciso", "security analyst", "vulnerability"],
+            "Security Analyst": ["security analyst", "soc", "penetration", "pt", "grc", "ciso", "vulnerability"],
             "DevOps": ["devops", "sre", "kubernetes", "docker", "terraform", "jenkins", "ci/cd"],
             "IT & System Admin": ["it", "help desk", "support", "sysadmin", "system administrator", "network engineer"]
         }
     },
     "Product & Design": {
-        "keywords": ["product", "manager", "designer", "graphic"],
+        "keywords": ["product", "manager", "designer", "graphic", "design"],
         "sub_categories": {
             "Product Manager": ["product manager", "product owner", "po", "pm", "inbound", "outbound", "pmo", "project manager"],
             "UX/UI Designer": ["ux", "ui", "product designer", "user experience", "user interface"],
@@ -296,20 +297,52 @@ my_categories = { "Data & BI": {
             "QA Automation": ["automation", "sdet", "selenium", "playwright", "cypress", "aut"]
         }
     },
-    "Hardware": {
-        "keywords": ["hardware", "board", "electrical", "vlsi", "asic", "fpga", "chip", "rf"],
+    "Hardware & Mechanical": {
+        "keywords": ["hardware", "board", "electrical", "vlsi", "asic", "fpga", "chip", "rf", "mechanical", "engineer", "technician", "maintenance"],
         "sub_categories": {
             "Hardware Engineer": ["hardware engineer", "board design", "circuit", "analog"],
-            "VLSI/Chip Design": ["vlsi", "asic", "fpga", "verification engineer", "rtl"],
-            "Electrical Engineer": ["electrical engineer", "power engineer", "rf engineer"]
+            "Mechanical Engineer": ["mechanical engineer", "mechanical technician", "machine"],
+            "Electrical Engineer": ["electrical engineer", "power engineer", "rf engineer"],
+            "Maintenance Technician": ["maintenance technician", "maintenance", "technician", "repair"],
+            "VLSI/Chip Design": ["vlsi", "asic", "fpga", "verification engineer", "rtl"]
         }
     },
     "Business & Sales": {
-        "keywords": ["sales", "business development", "sdr", "bdr", "account", "success", "B2B"],
+        "keywords": ["sales", "business development", "sdr", "bdr", "account", "success", "B2B", "sales manager"],
         "sub_categories": {
             "Sales / Account": ["account executive", "sales manager", "ae", "account manager"],
             "SDR / BDR": ["sdr", "bdr", "business development representative", "lead generation"],
             "Customer Success": ["customer success", "csm", "client success"]
+        }
+    },
+    "Operations & Logistics": {
+        "keywords": ["operations", "logistics", "warehouse", "supply chain", "inventory", "fulfillment"],
+        "sub_categories": {
+            "Warehouse Operations": ["warehouse", "picker", "packer", "fulfillment"],
+            "Supply Chain": ["supply chain", "procurement", "logistics"],
+            "Operations Manager": ["operations manager", "operations coordinator"]
+        }
+    },
+    "Retail & Customer Service": {
+        "keywords": ["retail", "store", "customer service", "sales associate", "cashier", "shop", "commercial"],
+        "sub_categories": {
+            "Store Manager": ["store manager", "retail manager", "shop manager"],
+            "Sales Associate": ["sales associate", "retail associate", "cashier"],
+            "Customer Service": ["customer service", "customer support", "call center"]
+        }
+    },
+    "HR & Administration": {
+        "keywords": ["hr", "human resources", "recruitment", "admin", "administrative"],
+        "sub_categories": {
+            "HR Specialist": ["hr", "recruiter", "recruitment", "talent acquisition"],
+            "Administrator": ["admin", "administrative", "office administrator"]
+        }
+    },
+    "Finance & Accounting": {
+        "keywords": ["finance", "accountant", "accounting", "bookkeeper", "financial"],
+        "sub_categories": {
+            "Accountant": ["accountant", "bookkeeper", "financial analyst"],
+            "Finance Manager": ["finance manager", "financial manager", "controller"]
         }
     }
 }
@@ -321,25 +354,45 @@ my_categories = { "Data & BI": {
 
 
 # 3. הגדרת ה-Prompt לסיווג
-template = """
-You are a career expert. Categorize the following list of jobs.
-For each job ID, provide:
-1. Category (High-level field)
-2. Sub-category (Specific niche)
-3. Seniority Level (intern, Junior, Senior, Lead)
+template = """You are an expert career classification system. Your task is to classify jobs into categories based on the job title and description.
 
-   clasificate jobs categories only from that category list!
-    {my_categories}
-   clasificate seniority level only to: intern, junior, senior, lead
+IMPORTANT RULES:
+1. Read the job TITLE first - it's usually the most accurate indicator
+2. Use description as secondary confirmation
+3. Match ONLY from the provided categories list
+4. If no clear match exists, use "Other"
+5. Be precise and careful - avoid defaults
 
-    Return the results as a JSON object with a key 'job_list' containing an array of objects.
-{format_instructions}   
-Jobs List:
+CLASSIFICATION CATEGORIES:
+{my_categories}
+
+SENIORITY LEVELS TO USE: intern, junior, senior, lead
+- If not explicitly mentioned in the job posting, default to "junior"
+
+EXAMPLES OF CORRECT CLASSIFICATIONS:
+- Job: "Store Manager" → main_category: "Retail & Customer Service", sub_category: "Store Manager", level: "senior"
+- Job: "Warehouse Picker" → main_category: "Operations & Logistics", sub_category: "Warehouse Operations", level: "junior"
+- Job: "Mechanical Engineer" → main_category: "Hardware & Mechanical", sub_category: "Mechanical Engineer", level: "junior"
+- Job: "Maintenance Technician" → main_category: "Hardware & Mechanical", sub_category: "Maintenance Technician", level: "junior"
+- Job: "Sensor Engineer" → main_category: "Hardware & Mechanical", sub_category: "Electrical Engineer", level: "junior"
+- Job: "Python Data Scientist" → main_category: "Data & BI", sub_category: "Data Science", level: "junior"
+
+JOBS TO CLASSIFY:
 {jobs_json}
 
+Return ONLY a valid JSON object with this exact structure:
+{{
+  "job_list": [
+    {{
+      "URL": "exact URL from input",
+      "main_category": "category name from list",
+      "sub_category": "subcategory name from list",
+      "level": "intern|junior|senior|lead"
+    }}
+  ]
+}}
 
-Return ONLY a JSON object where keys are Job IDs and values are objects with keys: 
-"category", "sub_category", "level".
+CRITICAL: Return ONLY JSON, no other text.
 """
 
 
