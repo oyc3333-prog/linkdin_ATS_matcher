@@ -236,13 +236,13 @@ junk_words = {
 
 
 
-
+@st.cache_data(show_spinner=False)
 def resume_classification(resume_text):
     class CvClassification(BaseModel):
         URL: str = Field(description="The original URL of the job")
         main_category: str = Field(description="The primary job category from the provided list")
         sub_category: str = Field(description="The specific sub-category")
-        level: str = Field(description="The expirement level is needed(intern/junior/senior/mid) just one value from that list!")
+        level: str = Field(description="The expirement level is needed(intern/junior/senior/lead) just one value from that list!")
 
 
 
