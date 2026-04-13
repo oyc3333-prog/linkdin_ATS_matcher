@@ -13,8 +13,8 @@ print("Starting AI Agent...")
 # 1. הגדרת המבנה (הטופס) - הפעם עם Pydantic סטנדרטי
 class JobClassification(BaseModel):
     url: str = Field(description="The original URL of the job")
-    main_category: str = Field(description="The primary job category from the provided list. if you dont find somthing that make sense - write "general")
-    sub_category: str = Field(description="The specific sub-category. if you dont find somthing that make sense - write "general")
+    main_category: str = Field(description="The primary job category from the provided list. if you dont find somthing that make sense - write general)
+    sub_category: str = Field(description="The specific sub-category. if you dont find somthing that make sense - write general)
     level: str = Field(description="The expirement level is needed(intern/junior/senior/mid) just one value from that list!")
 # 2. יצירת ה-Parser
 class jobClassClassificationList(BaseModel):
