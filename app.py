@@ -250,7 +250,7 @@ def resume_classification(resume_text):
     api_key = os.environ.get("GOOGLE_API_KEY")
     llm = ChatGoogleGenerativeAI(
         model="gemini-3.1-flash-lite-preview",
-        api_key=api_key, 
+        api_key="AIzaSyAH3K3jf1jOwUX6Zl02fm6_MOKaiczldF8", 
         temperature=0
     )
 
@@ -370,34 +370,7 @@ def resume_classification(resume_text):
     
     except Exception as e:
         print(f"Error during classification: {e}")
-        return "junior", "general", "general"  # ערכי ברירת מחדל במקרה של שגיאה
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+        return "junior", "Other", "Other"  # ערכי ברירת מחדל במקרה של שגיאה
 
 # --- פונקציות לוגיקה (מותאמות) ---
 
@@ -482,7 +455,8 @@ def ats_matcher(resume_text, jobs_df, resume_level, resume_category, resume_sub_
             'matched_skills': list(matched_gold),
             'missing_skills': list(job_gold_skills - cv_gold_skills),
             'location': row['location'],
-            'search_date': row['search_date']
+            'search_date': row['search_date'],
+            'main_category': row['main_category']
 
         })      
     
@@ -508,14 +482,14 @@ if uploaded_file:
     resume_level, resume_category, resume_sub_category = resume_classification(cleaned_cv)
     
 
-    query = "SELECT * FROM jobs WHERE main_category = ?"
-    
+    query = "SELECT * FROM jobs WHERE sub_category = ?"
+    print(f"resume category is {resume_category}")
     # אם לא זוהתה קטגוריה (Other), נמשוך את הכל כגיבוי
     if resume_category == "Other":
         query = "SELECT * FROM jobs"
         jobs_df = pd.read_sql_query(query, conn)
     else:
-        jobs_df = pd.read_sql_query(query, conn, params=(resume_category,))
+        jobs_df = pd.read_sql_query(query, conn, params=(resume_sub_category,))
 
     conn.close()
 
@@ -545,6 +519,7 @@ if uploaded_file:
                     st.markdown(f"**{row['company']}**")
                     st.markdown(f"**{row['location']}**")
                     st.markdown(f"**{row['search_date']}**")
+                    st.markdown(f"**{row['main_category']}**")
                    
                 with c3:
                     st.write("") 
@@ -560,3 +535,30 @@ if uploaded_file:
 
 # עיצוב רקע
 st.markdown("<style>.stApp { background-color: white; }</style>", unsafe_allow_html=True)
+
+
+
+
+
+
+import sqlite3
+import pandas as pd
+
+
+
+# 1. התחברות ל-DB (תוודא שהנתיב נכון לקובץ שלך)
+conn = sqlite3.connect("jobs.db") 
+
+# 2. שאילתה לשליפת הטייטלים והקטגוריות
+# שים לב: השתמשתי בשמות העמודות שמופיעים בשגיאות הקודמות שלך
+query = """
+SELECT job_title, main_category, sub_category 
+FROM jobs 
+LIMIT 100
+"""
+
+
+df = pd.read_sql_query(query, conn)
+df.head(50)
+conn.close()
+
