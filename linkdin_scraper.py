@@ -1,5 +1,7 @@
 
 #Import dependencies
+import os
+import time
 import requests
 from bs4 import BeautifulSoup
 import pandas as pd
@@ -9,6 +11,14 @@ import sqlite3
 import numpy as np
 import re
 from sentence_transformers import SentenceTransformer
+
+from pydantic import BaseModel, Field
+from langchain_core.output_parsers import JsonOutputParser
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_google_genai import ChatGoogleGenerativeAI
+
+
+
 model = SentenceTransformer('all-MiniLM-L6-v2')
 
 # %%
@@ -172,8 +182,79 @@ jobs_df.info()
 
 
 
-job_taxonomy = {
-    "Data & BI": {
+
+# import re
+
+# def get_match(text, taxonomy):
+#     """פונקציית עזר לחיפוש קטגוריה ותת-קטגוריה בטקסט נתון"""
+#     for category, content in taxonomy.items():
+#         # בדיקת קטגוריה ראשית
+#         cat_pattern = r'\b(' + '|'.join([re.escape(k) for k in content["keywords"]]) + r')\b'
+#         if re.search(cat_pattern, text, re.IGNORECASE):
+#             # אם נמצאה קטגוריה, נחפש תת-קטגוריה
+#             for sub_cat, sub_keywords in content["sub_categories"].items():
+#                 sub_pattern = r'\b(' + '|'.join([re.escape(k) for k in sub_keywords]) + r')\b'
+#                 if re.search(sub_pattern, text, re.IGNORECASE):
+#                     return category, sub_cat
+#             # אם נמצאה קטגוריה אבל לא תת-קטגוריה ספציפית
+#             return category, "General"
+#     return None, None
+
+# def classify_job_hierarchical(row):
+#     title = str(row['job_title']).lower()
+#     description = str(row['description_text']).lower()
+    
+#     # ניסיון 1: חיפוש בטייטל (הכי מדויק)
+#     category, sub_category = get_match(title, job_taxonomy)
+    
+#     # ניסיון 2: אם לא נמצא בטייטל, מחפשים בתיאור (גיבוי)
+#     if not category or not sub_category:
+#         category, sub_category = get_match(description, job_taxonomy)
+        
+#     # אם עדיין לא נמצא כלום
+#     if not category:
+#         category, sub_category = "Other", "General"
+        
+#     return pd.Series([category, sub_category])
+
+# # 1. יצירת חיבור לבסיס הנתונים
+# conn = sqlite3.connect('linkedin_jobs.db')
+# # הרצה על ה-Dataframe
+# jobs_df[['main_category', 'sub_category']] = jobs_df.apply(classify_job_hierarchical, axis=1)
+# jobs_df.info()
+
+# # %%
+# # 3. התחברות ל-DB (יוצר את הקובץ אם הוא לא קיים)
+# conn = sqlite3.connect('linkedin_jobs.db')
+
+# # 4. שמירת הנתונים לטבלה בשם 'jobs'
+# # if_exists='replace' ימחוק את הטבלה הישנה ויצור חדשה עם הנתונים מה-CSV
+# # אם אתה רוצה להוסיף לקיים, שנה ל-'append'
+# jobs_df.to_sql('jobs', conn, if_exists='append', index=False)
+
+
+
+
+
+
+class JobClassification(BaseModel):
+    URL: str = Field(description="The original URL of the job")
+    main_category: str = Field(description="The primary job category from the provided list")
+    sub_category: str = Field(description="The specific sub-category")
+    level: str = Field(description="The expirement level is needed(intern/junior/senior/mid) just one value from that list!")
+
+class jobClassClassificationList(BaseModel):
+    job_list: list[JobClassification]
+
+#set llm engine
+api_key = os.environ.get("GOOGLE_API_KEY")
+llm = ChatGoogleGenerativeAI(
+    model="gemini-3.1-flash-lite-preview",
+    api_key=api_key, 
+    temperature=0
+)
+
+my_categories = { "Data & BI": {
         "keywords": ["data", "bi", "crm", "sap", "ml"],
         "sub_categories": {
             "Data Analyst": [ "data analyst", "tableau", "power bi", "looker", "product analyst", "business analyst"],
@@ -233,60 +314,77 @@ job_taxonomy = {
     }
 }
 
+# 1. חיבור ל-SQL ומשיכת הנתונים
+# שנה את ה-connection string לפי מסד הנתונים שלך (SQLite/PostgreSQL/MySQL)
 
-import re
 
-def get_match(text, taxonomy):
-    """פונקציית עזר לחיפוש קטגוריה ותת-קטגוריה בטקסט נתון"""
-    for category, content in taxonomy.items():
-        # בדיקת קטגוריה ראשית
-        cat_pattern = r'\b(' + '|'.join([re.escape(k) for k in content["keywords"]]) + r')\b'
-        if re.search(cat_pattern, text, re.IGNORECASE):
-            # אם נמצאה קטגוריה, נחפש תת-קטגוריה
-            for sub_cat, sub_keywords in content["sub_categories"].items():
-                sub_pattern = r'\b(' + '|'.join([re.escape(k) for k in sub_keywords]) + r')\b'
-                if re.search(sub_pattern, text, re.IGNORECASE):
-                    return category, sub_cat
-            # אם נמצאה קטגוריה אבל לא תת-קטגוריה ספציפית
-            return category, "General"
-    return None, None
 
-def classify_job_hierarchical(row):
-    title = str(row['job_title']).lower()
-    description = str(row['description_text']).lower()
+
+# 3. הגדרת ה-Prompt לסיווג
+template = """
+You are a career expert. Categorize the following list of jobs.
+For each job ID, provide:
+1. Category (High-level field)
+2. Sub-category (Specific niche)
+3. Seniority Level (intern, Junior, Senior, Lead)
+
+   clasificate jobs categories only from that category list!
+    {my_categories}
+   clasificate seniority level only to: intern, junior, senior, lead
+
+    Return the results as a JSON object with a key 'job_list' containing an array of objects.
+{format_instructions}   
+Jobs List:
+{jobs_json}
+
+
+Return ONLY a JSON object where keys are Job IDs and values are objects with keys: 
+"category", "sub_category", "level".
+"""
+
+
+
+prompt = ChatPromptTemplate.from_template(template)
+parser = JsonOutputParser(pydantic_object=jobClassClassificationList)
+chain = prompt | llm | parser
+
+
+# 4. הלולאה המתוקנת - איסוף הנתונים
+all_jobs_results = [] # רשימה במקום דיקשיונרי
+chunk_size = 50
+for i in range(0, len(jobs_df), chunk_size):
+    chunk = jobs_df.iloc[i:i + chunk_size]
+    jobs_json = chunk[['URL', 'job_title', 'description_text']].to_json(orient='records')
     
-    # ניסיון 1: חיפוש בטייטל (הכי מדויק)
-    category, sub_category = get_match(title, job_taxonomy)
-    
-    # ניסיון 2: אם לא נמצא בטייטל, מחפשים בתיאור (גיבוי)
-    if not category or not sub_category:
-        category, sub_category = get_match(description, job_taxonomy)
+    try:
+        print(f"Processing chunk {i//chunk_size + 1}...")
+        response = chain.invoke({
+            "jobs_json": jobs_json, 
+            "my_categories": my_categories, 
+            "format_instructions": parser.get_format_instructions()
+        })
         
-    # אם עדיין לא נמצא כלום
-    if not category:
-        category, sub_category = "Other", "General"
-        
-    return pd.Series([category, sub_category])
+        # חילוץ הרשימה מתוך התגובה והוספה לרשימה הכללית
+        if 'job_list' in response:
+            all_jobs_results.extend(response['job_list'])
+        time.sleep(10) 
 
-# 1. יצירת חיבור לבסיס הנתונים
-conn = sqlite3.connect('linkedin_jobs.db')
-# הרצה על ה-Dataframe
-jobs_df[['main_category', 'sub_category']] = jobs_df.apply(classify_job_hierarchical, axis=1)
-jobs_df.info()
+    except Exception as e:
+        print(f"Error: {e}")
 
-# %%
-# 3. התחברות ל-DB (יוצר את הקובץ אם הוא לא קיים)
-conn = sqlite3.connect('linkedin_jobs.db')
+# הפיכה ל-DataFrame בסוף
+results_df = pd.DataFrame(all_jobs_results)
+print(f"Total jobs classified: {len(results_df)}")
+print(results_df)
 
-# 4. שמירת הנתונים לטבלה בשם 'jobs'
-# if_exists='replace' ימחוק את הטבלה הישנה ויצור חדשה עם הנתונים מה-CSV
-# אם אתה רוצה להוסיף לקיים, שנה ל-'append'
-jobs_df.to_sql('jobs', conn, if_exists='append', index=False)
+jobs_df = jobs_df.merge(results_df, left_on='URL', right_on='URL', how='left')
+
 
 
 
 conn = sqlite3.connect('linkedin_jobs.db')
 cursor = conn.cursor()
+jobs_df.to_sql('jobs', conn, if_exists='append', index=False)
 
 # 1. יצירת טבלה זמנית עם נתונים ייחודיים בלבד לפי ה-URL
 # אנחנו משתמשים ב-GROUP BY כדי לוודא שכל URL מופיע רק פעם אחת
@@ -380,9 +478,6 @@ gold_skills = {
 }
 
 
-
-
-
 # 3. פונקציית חילוץ סקילים מתיאור המשרה
 def extract_skills(description, skills_set):
     if not description:
@@ -418,7 +513,4 @@ conn.commit()
 conn.close()
 print(f"Extraction complete! Found {len(skills_in_jobs_df)} skill matches.")
 skills_in_jobs_df
-
-
-
 
