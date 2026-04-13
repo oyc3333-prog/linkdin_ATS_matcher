@@ -166,7 +166,7 @@ chain = prompt | llm | parser
 
 # 4. הלולאה המתוקנת - איסוף הנתונים
 all_jobs_results = [] # רשימה במקום דיקשיונרי
-chunk_size = 50
+chunk_size = 100
 for i in range(0, len(df), chunk_size):
     chunk = df.iloc[i:i + chunk_size]
     jobs_json = chunk[['URL', 'job_title', 'description_text']].to_json(orient='records')
@@ -183,7 +183,7 @@ for i in range(0, len(df), chunk_size):
         if 'job_list' in response:
             all_jobs_results.extend(response['job_list'])
             
-        time.sleep(4) 
+        time.sleep(20) 
     except Exception as e:
         print(f"Error: {e}")
 
