@@ -1,13 +1,21 @@
-import streamlit as st
-import pdfplumber
-import sqlite3
-import pandas as pd
-import spacy
+import os
 import time
 import re
 import numpy as np
-from sentence_transformers import SentenceTransformer, util
+import sqlite3
+import pandas as pd
 
+
+from sentence_transformers import SentenceTransformer, util
+import spacy
+
+import pdfplumber
+import streamlit as st
+from pydantic import BaseModel, Field
+
+from langchain_core.output_parsers import JsonOutputParser
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_google_genai import ChatGoogleGenerativeAI
 
 
 # --- טעינת מודלים (עם Caching כדי למנוע איטיות) ---
@@ -98,11 +106,7 @@ def load_heavy_models():
 model, nlp = load_heavy_models()
 
 # --- מילות מפתח (מהקוד שלך) ---
-seniority_keywords = {
-    'senior', 'sr', 'lead', 'leader', 'leading', 'manager', 'management', 
-    'principal', 'head', 'vp', 'director', 'expert', 'staff', 'team lead', 'c++', 'cloud', 'cobol', 'backend', 'frontend', 'full stack', 'architect', 'solution architect', 'data architect', 'chief', 'officer', 'cto', 'ceo', 'qa'
-}
-# Define gold skills (prioritized in gap analysis)
+
 gold_skills = {
 
     #sales
@@ -229,67 +233,169 @@ junk_words = {
     'show', 'shows', 'showed', 'showing', 'display', 'displays', 'practical', 'practically',
     'internal', 'external', 'global', 'local', 'wide', 'broad', 'deep', 'deeply'
 }
-# הגדרת טקסונומיה היררכית של קטגוריות משרות עם מילות מפתח וסאב-קטגוריות
-job_taxonomy = {
-    "Data & BI": {
-        "keywords": ["data", "bi", "crm", "sap", "ml"],
-        "sub_categories": {
-            "Data Analyst": [ "data analyst", "tableau", "power bi", "looker", "product analyst", "business analyst"],
-            "Data Engineer": ["data engineer", "etl", "pipeline", "airflow", "bigquery", "redshift", "spark"],
-            "Data Science": ["scientist", "machine learning", "ml", "nlp", "deep learning", "researcher"],
-            "AI Engineer": ["ai engineer", "genai", "generative ai", "llm", "langchain", "openai", "rag"],
-            "Data Operations": ["operations", "ops"]
-        }
-    },
-    "Software Engineering": {
-        "keywords": ["software", "developer", "engineer", "fullstack", "backend", "frontend"],
-        "sub_categories": {
-            "Backend Dev": ["backend"],
-            "Frontend Dev": ["frontend", "front"],
-            "Fullstack Dev": ["fullstack", "full-stack", "full stack"],
-            "Mobile Dev": ["ios", "android", "mobile"]
-        }
-    },
-    "Cyber & IT": {
-        "keywords": ["cyber", "security", "it", "system", "cloud", "network", "infosec", "support", "service"],
-        "sub_categories": {
-            "Security Analyst": ["security analyst", "soc", "penetration", "pt", "grc", "ciso", "security analyst", "vulnerability"],
-            "DevOps": ["devops", "sre", "kubernetes", "docker", "terraform", "jenkins", "ci/cd"],
-            "IT & System Admin": ["it", "help desk", "support", "sysadmin", "system administrator", "network engineer", "support", "service"]
-        }
-    },
-    "Product & Design": {
-        "keywords": ["product", "manager", "designer", "graphic"],
-        "sub_categories": {
-            "Product Manager": ["product manager", "product owner", "po", "pm", "inbound", "outbound", "pmo", "project manager"],
-            "UX/UI Designer": ["ux", "ui", "product designer", "user experience", "user interface"],
-            "Graphic Designer": ["graphic", "motion", "illustrator", "photoshop", "creative designer"]
-        }
-    },
-    "QA": {
-        "keywords": ["qa", "testing", "quality", "test", "verification", "validation"],
-        "sub_categories": {
-            "QA Manual": ["manual"],
-            "QA Automation": ["automation", "sdet", "selenium", "playwright", "cypress", "aut"]
-        }
-    },
-    "Hardware": {
-        "keywords": ["hardware", "board", "electrical", "vlsi", "asic", "fpga", "chip", "rf"],
-        "sub_categories": {
-            "Hardware Engineer": ["hardware engineer", "board design", "circuit", "analog"],
-            "VLSI/Chip Design": ["vlsi", "asic", "fpga", "verification engineer", "rtl"],
-            "Electrical Engineer": ["electrical engineer", "power engineer", "rf engineer"]
-        }
-    },
-    "Business & Sales": {
-        "keywords": ["sales", "business development", "sdr", "bdr", "account", "success", "B2B"],
-        "sub_categories": {
-            "Sales / Account": ["account executive", "sales manager", "ae", "account manager"],
-            "SDR / BDR": ["sdr", "bdr", "business development representative", "lead generation"],
-            "Customer Success": ["customer success", "csm", "client success"]
+
+
+
+
+def resume_classification(resume_text):
+    class CvClassification(BaseModel):
+        URL: str = Field(description="The original URL of the job")
+        main_category: str = Field(description="The primary job category from the provided list")
+        sub_category: str = Field(description="The specific sub-category")
+        level: str = Field(description="The expirement level is needed(intern/junior/senior/mid) just one value from that list!")
+
+
+
+    #set llm engine
+    api_key = os.environ.get("GOOGLE_API_KEY")
+    llm = ChatGoogleGenerativeAI(
+        model="gemini-3.1-flash-lite-preview",
+        api_key=api_key, 
+        temperature=0
+    )
+
+
+
+    my_categories = { "Data & BI": {
+            "keywords": ["data", "bi", "crm", "sap", "ml"],
+            "sub_categories": {
+                "Data Analyst": [ "data analyst", "tableau", "power bi", "looker", "product analyst", "business analyst"],
+                "Data Engineer": ["data engineer", "etl", "pipeline", "airflow", "bigquery", "redshift", "spark"],
+                "Data Science": ["scientist", "machine learning", "ml", "nlp", "deep learning", "researcher"],
+                "AI Engineer": ["ai engineer", "genai", "generative ai", "llm", "langchain", "openai", "rag"],
+                "Data Operations": ["operations", "ops"]
+            }
+        },
+        "Software Engineering": {
+            "keywords": ["software", "developer", "engineer", "fullstack", "backend", "frontend"],
+            "sub_categories": {
+                "Backend Dev": ["backend"],
+                "Frontend Dev": ["frontend", "front"],
+                "Fullstack Dev": ["fullstack", "full-stack", "full stack"],
+                "Mobile Dev": ["ios", "android", "mobile"]
+            }
+        },
+        "Cyber & IT": {
+            "keywords": ["cyber", "security", "it", "system", "cloud", "network", "infosec"],
+            "sub_categories": {
+                "Security Analyst": ["security analyst", "soc", "penetration", "pt", "grc", "ciso", "security analyst", "vulnerability"],
+                "DevOps": ["devops", "sre", "kubernetes", "docker", "terraform", "jenkins", "ci/cd"],
+                "IT & System Admin": ["it", "help desk", "support", "sysadmin", "system administrator", "network engineer"]
+            }
+        },
+        "Product & Design": {
+            "keywords": ["product", "manager", "designer", "graphic"],
+            "sub_categories": {
+                "Product Manager": ["product manager", "product owner", "po", "pm", "inbound", "outbound", "pmo", "project manager"],
+                "UX/UI Designer": ["ux", "ui", "product designer", "user experience", "user interface"],
+                "Graphic Designer": ["graphic", "motion", "illustrator", "photoshop", "creative designer"]
+            }
+        },
+        "QA": {
+            "keywords": ["qa", "testing", "quality", "test", "verification", "validation"],
+            "sub_categories": {
+                "QA Manual": ["manual"],
+                "QA Automation": ["automation", "sdet", "selenium", "playwright", "cypress", "aut"]
+            }
+        },
+        "Hardware": {
+            "keywords": ["hardware", "board", "electrical", "vlsi", "asic", "fpga", "chip", "rf"],
+            "sub_categories": {
+                "Hardware Engineer": ["hardware engineer", "board design", "circuit", "analog"],
+                "VLSI/Chip Design": ["vlsi", "asic", "fpga", "verification engineer", "rtl"],
+                "Electrical Engineer": ["electrical engineer", "power engineer", "rf engineer"]
+            }
+        },
+        "Business & Sales": {
+            "keywords": ["sales", "business development", "sdr", "bdr", "account", "success", "B2B"],
+            "sub_categories": {
+                "Sales / Account": ["account executive", "sales manager", "ae", "account manager"],
+                "SDR / BDR": ["sdr", "bdr", "business development representative", "lead generation"],
+                "Customer Success": ["customer success", "csm", "client success"]
+            }
         }
     }
-}
+
+
+
+
+    # 3. הגדרת ה-Prompt לסיווג
+    template = """
+    You are a career expert. Categorize the cv.
+    provide:
+    1. Category (High-level field)
+    2. Sub-category (Specific niche)
+    3. Seniority Level (intern, Junior, Senior, Lead)
+
+    clasificate jobs categories only from that category list!
+        {my_categories}
+    clasificate seniority level only to: intern, junior, senior, lead
+
+        Return the results as a JSON object fit to 
+    {format_instructions}   
+    .
+
+    cvs to classify:
+    {resume_text}
+
+    """
+
+    
+
+    prompt = ChatPromptTemplate.from_template(template)
+    parser = JsonOutputParser(pydantic_object=CvClassification)
+    chain = prompt | llm | parser
+
+
+    try:
+        print("Classifying CV...")
+        result = chain.invoke({
+            "resume_text": resume_text, # הטקסט של קורות החיים שלך
+            "my_categories": my_categories,
+            "format_instructions": parser.get_format_instructions()
+        })
+
+        # 2. חילוץ הערכים למשתנים בודדים
+        resume_main_category = result.get('main_category')
+        resume_sub_category = result.get('sub_category')
+        resume_level = result.get('level')
+
+        # הדפסה לבדיקה
+        print(f"--- Classification Results ---")
+        print(f"Level: {resume_level}")
+        print(f"Main Category: {resume_main_category}")
+        print(f"Sub Category: {resume_sub_category}")
+
+        return resume_level, resume_main_category, resume_sub_category
+    
+    except Exception as e:
+        print(f"Error during classification: {e}")
+        return "junior", "general", "general"  # ערכי ברירת מחדל במקרה של שגיאה
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -306,20 +412,7 @@ def extract_keywords(text):
                 and token.lemma_ not in junk_words and len(token.lemma_) > 2}
     return keywords
 
-def get_category(text, taxonomy):
-    """פונקציית עזר לחיפוש קטגוריה ותת-קטגוריה בטקסט נתון"""
-    for category, content in taxonomy.items():
-        # בדיקת קטגוריה ראשית
-        cat_pattern = r'\b(' + '|'.join([re.escape(k) for k in content["keywords"]]) + r')\b'
-        if re.search(cat_pattern, text, re.IGNORECASE):
-            # אם נמצאה קטגוריה, נחפש תת-קטגוריה
-            for sub_cat, sub_keywords in content["sub_categories"].items():
-                sub_pattern = r'\b(' + '|'.join([re.escape(k) for k in sub_keywords]) + r')\b'
-                if re.search(sub_pattern, text, re.IGNORECASE):
-                    return category, sub_cat
-            # אם נמצאה קטגוריה אבל לא תת-קטגוריה ספציפית
-            return category, "General"
-    return None, None
+
     
 
 def category_score(resume_category, resume_sub_category, job_category, job_sub_category):
@@ -331,12 +424,12 @@ def category_score(resume_category, resume_sub_category, job_category, job_sub_c
         
     
 
-def ats_matcher(resume_text, jobs_df):
+def ats_matcher(resume_text, jobs_df, resume_level, resume_category, resume_sub_category):
     resume_processed = resume_text.lower()
     resume_keywords = extract_keywords(resume_text)
     cv_gold_skills = resume_keywords & gold_skills
     resume_emb = model.encode(resume_processed, convert_to_tensor=True)
-    resume_category, resume_sub_category = get_category(resume_text, job_taxonomy)
+    
     
     results = []
     for idx, row in jobs_df.iterrows():
@@ -344,6 +437,7 @@ def ats_matcher(resume_text, jobs_df):
         job_title = row['job_title']
         job_main_cat= row['main_category']
         job_sub_cat= row['sub_category']
+        job_level = row['level']
         # חישוב ציון קטגוריה
         category_score_value = category_score(resume_category, resume_sub_category, job_main_cat, job_sub_cat)
        # --- תיקון חלק הסמנטיקה בתוך הלולאה ---
@@ -370,12 +464,13 @@ def ats_matcher(resume_text, jobs_df):
         combined_score = 30  + (0.2 * semantic_score + 0.5 * skill_score + 0.3 * category_score_value) * 0.7
         
         # קנס בכירות
-        is_senior_job = any(word in job_title.lower() for word in seniority_keywords or word in job_desc.lower() for word in seniority_keywords)
-        is_cv_senior = any(word in resume_processed for word in seniority_keywords)
-        if is_senior_job and not is_cv_senior:
-            combined_score -= 35
-        else: 
-            combined_score += 15
+        if job_level == "Senior" and resume_level in ["intern", "junior"]:
+            combined_score -= 20
+        elif job_level == "Lead" and resume_level in ["intern", "junior", "senior"]:
+            combined_score -= 20
+        else:
+            combined_score += 10  
+        
 
         results.append({
             'job_title': job_title,
@@ -410,7 +505,7 @@ if uploaded_file:
 
     # טעינת משרות מה-DB
     conn = sqlite3.connect('linkedin_jobs.db')
-    resume_category, resume_sub_category = get_category(cleaned_cv, job_taxonomy)
+    resume_level, resume_category, resume_sub_category = resume_classification(cleaned_cv)
     
 
     query = "SELECT * FROM jobs WHERE main_category = ?"
@@ -429,7 +524,7 @@ if uploaded_file:
         st.subheader("המשרות המתאימות ביותר עבורך:")
         
         with st.spinner("...מוצא לך את המשרות המתאימות ביותר בשבילך"):
-            results_df = ats_matcher(cleaned_cv, jobs_df)
+            results_df = ats_matcher(cleaned_cv, jobs_df, resume_level, resume_category, resume_sub_category)
         st.subheader("נמצאו {} משרות מתאימות עבורך".format(len(results_df)))
         for _, row in results_df.iterrows():
             # יצירת כרטיס משרה בסגנון לינקדין
@@ -452,8 +547,9 @@ if uploaded_file:
                     st.markdown(f"**{row['search_date']}**")
                    
                 with c3:
-                    st.write("") # ריווח
-                    st.write(row['description'])
+                    st.write("") 
+                    with st.expander("🔍 קרא את תיאור המשרה המלא"):
+                        st.write(row['description'])
                 
                 with c4:
                     st.write("") # ריווח
