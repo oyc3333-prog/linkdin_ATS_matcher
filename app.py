@@ -1,36 +1,52 @@
+# =============================================================================
+# app.py — LinkedIn ATS Matcher (Streamlit UI)
+#
+# Flow when a user uploads a CV:
+#   1. Extract text from PDF
+#   2. Classify the CV with Gemini LLM → main_category, sub_category, level
+#   3. Pull matching jobs from SQLite (filtered by main_category)
+#   4. Score every job with a 4-component formula
+#   5. Show the top 50 results as LinkedIn-style cards
+#
+# Scoring formula:
+#   25% — Category match (main + sub)
+#   30% — Skill overlap against gold_skills set
+#   25% — Seniority level match (with overqualification penalty)
+#   20% — Semantic cosine similarity (BERT embeddings)
+# =============================================================================
+
 import os
-import time
 import re
-import numpy as np
+import time
 import sqlite3
+import numpy as np
 import pandas as pd
 from dotenv import load_dotenv
 
+# Load .env file for GOOGLE_API_KEY in local development
 load_dotenv()
-
 
 from sentence_transformers import SentenceTransformer, util
 import spacy
-
 import pdfplumber
 import streamlit as st
 from pydantic import BaseModel, Field
-
 from langchain_core.output_parsers import JsonOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_google_genai import ChatGoogleGenerativeAI
 
 
-# --- טעינת מודלים (עם Caching כדי למנוע איטיות) ---
-# 1. הגדרות דף (תמיד בשורה הראשונה של ה-UI)
+# =============================================================================
+# PAGE CONFIG — must be the first Streamlit call
+# =============================================================================
 st.set_page_config(page_title="LinkedIn ATS Matcher", layout="wide")
+
+# LinkedIn-style CSS: light grey background, white job cards, blue skill tags, blue buttons
 st.markdown("""
     <style>
-    /* רקע אפור בהיר כמו בלינקדין */
-    .stApp {
-        background-color: #f3f2ef;
-    }
-    /* כרטיס משרה לבן עם צל */
+    .stApp { background-color: #f3f2ef; }
+
+    /* White card with subtle shadow for each job result */
     .job-card {
         background-color: white;
         padding: 20px;
@@ -39,7 +55,8 @@ st.markdown("""
         margin-bottom: 15px;
         box-shadow: 0 1px 3px rgba(0,0,0,0.1);
     }
-    /* תגיות כישורים */
+
+    /* Blue pill tags for matched skills */
     .skill-tag {
         display: inline-block;
         background-color: #e7f3ff;
@@ -50,11 +67,11 @@ st.markdown("""
         margin: 2px;
         font-weight: 600;
     }
-    .missing-tag {
-        background-color: #f3f2ef;
-        color: #666666;
-    }
-            /* עיצוב כפתור לינקדין */
+
+    /* Grey pill tags for missing skills */
+    .missing-tag { background-color: #f3f2ef; color: #666666; }
+
+    /* LinkedIn-style rounded blue Apply button */
     div.stButton > button, div.stLinkButton > a {
         background-color: #0a66c2 !important;
         color: white !important;
@@ -63,56 +80,70 @@ st.markdown("""
         padding: 0.5rem 1.5rem !important;
         border: none !important;
         width: 100% !important;
-        text-decoration: none !important; /* חשוב ללינק */
+        text-decoration: none !important;
         display: inline-flex !important;
         align-items: center !important;
         justify-content: center !important;
         height: 40px !important;
         transition: background-color 0.2s, box-shadow 0.2s !important;
     }
-
     div.stButton > button:hover, div.stLinkButton > a:hover {
         background-color: #004182 !important;
         color: white !important;
     }
     </style>
 """, unsafe_allow_html=True)
-# 2. פונקציית טעינת המודלים עם מסך הטעינה
+
+
+# =============================================================================
+# HEAVY MODEL LOADING — cached so they only load once per session
+# Loading on cold start shows a progress bar to the user.
+#
+# SentenceTransformer (all-MiniLM-L6-v2):
+#   - Encodes the CV text into a 384-dim vector
+#   - Compared against pre-stored job vectors (bert_vector BLOB in DB)
+#   - Cosine similarity = semantic match score
+#
+# spaCy (en_core_web_md):
+#   - Used for NLP keyword extraction (nouns, proper nouns, adjectives)
+#   - Extracts meaningful terms from both CV and job descriptions
+#   - Lemmatizes tokens so "engineers" matches "engineer"
+# =============================================================================
 @st.cache_resource
 def load_heavy_models():
     status_text = st.empty()
     progress_bar = st.progress(0)
-    status_text.text("🔄 מאתחל מנוע AI... (זה עשוי לקחת דקה בפעם הראשונה)")
+    status_text.text("🔄 Initializing AI engine... (first load may take a minute)")
     progress_bar.progress(10)
-    
-    # טעינת SentenceTransformer
-    status_text.text("🧠 טוען מודל שפה סמנטי (SentenceTransformer)...")
+
+    status_text.text("🧠 Loading semantic language model (SentenceTransformer)...")
     model = SentenceTransformer('all-MiniLM-L6-v2')
     progress_bar.progress(50)
-    
-    # טעינת Spacy
-    status_text.text("📝 טוען מילון מונחים טכנולוגי (NLP)...")
+
+    status_text.text("📝 Loading NLP vocabulary (spaCy)...")
     try:
         nlp = spacy.load('en_core_web_md')
     except:
         spacy.cli.download("en_core_web_md")
         nlp = spacy.load('en_core_web_md')
-    
+
     progress_bar.progress(100)
     time.sleep(1)
-    
     status_text.empty()
     progress_bar.empty()
     return model, nlp
 
-# 3. קריאה לפונקציית הטעינה - זה יקרה ברגע שהדף עולה
 model, nlp = load_heavy_models()
 
-# --- מילות מפתח (מהקוד שלך) ---
 
+# =============================================================================
+# GOLD SKILLS SET
+# Curated list of ~300 recognizable technical and business skills.
+# Used for exact/whole-word matching against CV and job descriptions.
+# A "gold skill" found in both CV and job → contributes to the skills score.
+# =============================================================================
 gold_skills = {
-
-    #sales
+    # Sales & Business
     "Cold Calling", "Lead Generation", "Outbound Prospecting", "CRM Management",
     "Salesforce", "HubSpot", "B2B SaaS", "Pipeline Management", "Quota Attainment",
     "Customer Acquisition", "Relationship Building", "Negotiation", "Closing Deals",
@@ -120,72 +151,73 @@ gold_skills = {
     "Account Management", "Objection Handling", "Inbound Leads", "Sales Funnel",
     "Business Development", "SDR", "BDR", "Hunter Mentality", "Presentation Skills",
     "Strategic Partnership", "Value-based Selling", "Revenue Growth", "KPI Driven", "sales",
+
     # Programming Languages & Environments
-    'python', 'sql', 'javascript', 'typescript', 'java', 'scala', 'c++', 'julia', 'rust', 
-    'r programming', 'golang', 'bash', 'powershell', 'vba', 'html5', 'css', 'php', 'node.js', 
+    'python', 'sql', 'javascript', 'typescript', 'java', 'scala', 'c++', 'julia', 'rust',
+    'r programming', 'golang', 'bash', 'powershell', 'vba', 'html5', 'css', 'php', 'node.js',
     'pyspark', 'sas', 'matlab', 'apex', 'ruby', 'perl', 'solidity', 'linux', 'unix',
 
     # Data Science, ML & AI
-    'pandas', 'numpy', 'scikit-learn', 'sklearn', 'tensorflow', 'keras', 'pytorch', 'xgboost', 
-    'lightgbm', 'catboost', 'statsmodels', 'scipy', 'nltk', 'spacy', 'gensim', 'transformers', 
-    'huggingface', 'opencv', 'k-means', 'random forest', 'gradient boosting', 'neural networks', 
-    'deep learning', 'reinforcement learning', 'computer vision', 'natural language processing', 
+    'pandas', 'numpy', 'scikit-learn', 'sklearn', 'tensorflow', 'keras', 'pytorch', 'xgboost',
+    'lightgbm', 'catboost', 'statsmodels', 'scipy', 'nltk', 'spacy', 'gensim', 'transformers',
+    'huggingface', 'opencv', 'k-means', 'random forest', 'gradient boosting', 'neural networks',
+    'deep learning', 'reinforcement learning', 'computer vision', 'natural language processing',
     'nlp', 'llm', 'langchain', 'rag', 'prompt engineering', 'explainable ai', 'xai',
 
     # Databases & Storage
-    'postgresql', 'mysql', 'mongodb', 'redis', 'elasticsearch', 'cassandra', 'oracle db', 
-    'sql server', 'sqlite', 'mariadb', 'dynamodb', 'snowflake', 'bigquery', 'redshift', 
-    'teradata', 'neo4j', 'cosmosdb', 'influxdb', 'clickhouse', 'presto', 'trino', 'hive', 
+    'postgresql', 'mysql', 'mongodb', 'redis', 'elasticsearch', 'cassandra', 'oracle db',
+    'sql server', 'sqlite', 'mariadb', 'dynamodb', 'snowflake', 'bigquery', 'redshift',
+    'teradata', 'neo4j', 'cosmosdb', 'influxdb', 'clickhouse', 'presto', 'trino', 'hive',
     'hbase', 'nosql', 'rdbms', 'schema-on-read', 'schema-on-write',
 
     # Visualization & BI
-    'tableau', 'power bi', 'looker', 'google data studio', 'qlikview', 'qliksense', 
-    'matplotlib', 'seaborn', 'plotly', 'd3.js', 'grafana', 'kibana', 'superset', 'dash', 
+    'tableau', 'power bi', 'looker', 'google data studio', 'qlikview', 'qliksense',
+    'matplotlib', 'seaborn', 'plotly', 'd3.js', 'grafana', 'kibana', 'superset', 'dash',
     'streamlit', 'microstrategy', 'sap businessobjects', 'dax', 'power query',
 
     # Data Engineering & ETL
-    'apache airflow', 'dbt', 'apache kafka', 'apache spark', 'databricks', 'talend', 
-    'informatica', 'pentaho', 'stitch', 'fivetran', 'alteryx', 'apache nifi', 'hadoop', 
-    'mapreduce', 'etl', 'elt', 'data pipeline', 'data warehouse', 'data lake', 'data mesh', 
+    'apache airflow', 'dbt', 'apache kafka', 'apache spark', 'databricks', 'talend',
+    'informatica', 'pentaho', 'stitch', 'fivetran', 'alteryx', 'apache nifi', 'hadoop',
+    'mapreduce', 'etl', 'elt', 'data pipeline', 'data warehouse', 'data lake', 'data mesh',
     'batch processing', 'stream processing', 'airflow',
 
     # Cloud & DevOps
-    'aws', 'azure', 'google cloud platform', 'gcp', 'amazon s3', 'ec2', 'lambda', 
-    'sagemaker', 'docker', 'kubernetes', 'terraform', 'ansible', 'jenkins', 'git', 
+    'aws', 'azure', 'google cloud platform', 'gcp', 'amazon s3', 'ec2', 'lambda',
+    'sagemaker', 'docker', 'kubernetes', 'terraform', 'ansible', 'jenkins', 'git',
     'github', 'gitlab', 'bitbucket', 'ci/cd', 'serverless', 'microservices',
 
     # Statistics & Math
-    'linear regression', 'logistic regression', 'hypothesis testing', 'a/b testing', 
-    'bayesian statistics', 'probability theory', 'linear algebra', 'calculus', 
-    'optimization', 'time series analysis', 'forecasting', 'clustering', 
+    'linear regression', 'logistic regression', 'hypothesis testing', 'a/b testing',
+    'bayesian statistics', 'probability theory', 'linear algebra', 'calculus',
+    'optimization', 'time series analysis', 'forecasting', 'clustering',
     'dimension reduction', 'pca', 'anova', 'monte carlo simulation', 'statistics',
 
     # Product, Business & Analysis
-    'kpis', 'conversion rate', 'churn analysis', 'retention', 'ltv', 'cac', 
-    'customer segmentation', 'funnel analysis', 'market basket analysis', 'cohort analysis', 
-    'roi', 'seo', 'sem', 'google analytics', 'amplitude', 'mixpanel', 'segment', 
+    'kpis', 'conversion rate', 'churn analysis', 'retention', 'ltv', 'cac',
+    'customer segmentation', 'funnel analysis', 'market basket analysis', 'cohort analysis',
+    'roi', 'seo', 'sem', 'google analytics', 'amplitude', 'mixpanel', 'segment',
     'crm', 'salesforce', 'hubspot', 'strategic decisions', 'actionable insights',
 
     # Development & Architecture
-    'rest api', 'graphql', 'soap', 'json', 'xml', 'web scraping', 'selenium', 
-    'beautifulsoup', 'oauth', 'jwt', 'agile', 'scrum', 'kanban', 'jira', 'confluence', 
-    'unit testing', 'pytest', 'integration testing', 'regex', 'excel vba', 
+    'rest api', 'graphql', 'soap', 'json', 'xml', 'web scraping', 'selenium',
+    'beautifulsoup', 'oauth', 'jwt', 'agile', 'scrum', 'kanban', 'jira', 'confluence',
+    'unit testing', 'pytest', 'integration testing', 'regex', 'excel vba',
     'object-oriented programming', 'oop', 'functional programming', 'distributed systems',
     'multi-threading', 'parallel computing', 'microservices architecture',
 
     # Specialized Data Skills
-    'anomaly detection', 'recommendation systems', 'graph theory', 'decision trees', 
-    'support vector machines', 'svm', 'ensemble learning', 'bagging', 'boosting', 
-    'data normalization', 'feature engineering', 'hyperparameter tuning', 
-    'cross validation', 'overfitting', 'underfitting', 'data governance', 
+    'anomaly detection', 'recommendation systems', 'graph theory', 'decision trees',
+    'support vector machines', 'svm', 'ensemble learning', 'bagging', 'boosting',
+    'data normalization', 'feature engineering', 'hyperparameter tuning',
+    'cross validation', 'overfitting', 'underfitting', 'data governance',
     'data privacy', 'gdpr', 'cybersecurity', 'blockchain', 'data mining',
     'exploratory data analysis', 'eda', 'data quality', 'data integrity'
 }
 
-# Junk words to exclude
+# Words to exclude from NLP keyword extraction — generic verbs, adjectives,
+# HR buzzwords, and structural words that carry no meaningful signal.
+# Without this filter, "experience", "strong", "build" would pollute skill matching.
 junk_words = {
-  
-    # מילות מבנה, גיוס וסטטוס (כולל הטיות)
     'experience', 'experiences', 'experienced', 'experiencing', 'year', 'years', 'yr', 'yrs',
     'candidate', 'candidates', 'candidacy', 'applicant', 'applicants', 'application',
     'role', 'roles', 'position', 'positions', 'job', 'jobs', 'career', 'careers',
@@ -196,8 +228,6 @@ junk_words = {
     'university', 'college', 'academic', 'education', 'background', 'qualification', 'qualifications',
     'plus', 'advantage', 'advantages', 'bonus', 'preferred', 'preference', 'priority',
     'field', 'industry', 'sectors', 'domain', 'environment', 'environments', 'space',
-
-    # שמות תואר גנריים וסופרלטיבים (הטיות ותצורות שונות)
     'strong', 'stronger', 'strongly', 'excellent', 'excellence', 'outstanding', 'great', 'greater',
     'solid', 'solidly', 'proven', 'proactive', 'passionate', 'passion', 'motivated', 'motivation',
     'independent', 'independently', 'creative', 'creativity', 'flexible', 'flexibility',
@@ -208,8 +238,6 @@ junk_words = {
     'hands-on', 'handson', 'detail-oriented', 'detailed', 'details', 'attention',
     'team-player', 'collaborative', 'interpersonal', 'self-starter', 'ambitious',
     'analytical', 'analysis', 'analytic', 'analytically', 'operational', 'operations',
-
-    # פעלים תפעוליים והטיות זמן (ה"רעש" המרכזי)
     'join', 'joins', 'joined', 'joining', 'build', 'builds', 'built', 'building',
     'create', 'creates', 'created', 'creating', 'creation', 'develop', 'develops', 'developed', 'developing',
     'support', 'supports', 'supported', 'supporting', 'maintain', 'maintains', 'maintained', 'maintaining',
@@ -223,8 +251,6 @@ junk_words = {
     'implement', 'implements', 'implemented', 'implementing', 'work', 'works', 'worked', 'working',
     'collaborate', 'collaborates', 'collaborated', 'collaborating', 'collaboration',
     'coordinate', 'coordinates', 'coordinated', 'coordinating', 'drive', 'drives', 'driven', 'driving',
-
-    # מילים קטנות, הטיות כמות והשוואה
     'less', 'more', 'most', 'least', 'much', 'many', 'very', 'extremely', 'highly',
     'hand', 'hands', 'flow', 'flows', 'scale', 'scales', 'scaling', 'scaled',
     'issue', 'issues', 'log', 'logs', 'logging', 'mindset', 'mindsets',
@@ -238,26 +264,36 @@ junk_words = {
 }
 
 
-
+# =============================================================================
+# CV CLASSIFICATION — Gemini LLM
+# Reads the candidate's CV text and returns:
+#   - main_category: which industry bucket they belong to
+#   - sub_category:  their specific role type
+#   - level:         seniority (intern / junior / senior / lead)
+#
+# This is then used to:
+#   1. Filter jobs from the DB (only same main_category)
+#   2. Compute the category and seniority score components
+#
+# Cached with @st.cache_data so re-uploading the same CV doesn't re-call the LLM.
+# =============================================================================
 @st.cache_data(show_spinner=False)
 def resume_classification(resume_text):
+    # Output schema — one classification for the whole CV
     class CvClassification(BaseModel):
         URL: str = Field(description="The original URL of the job")
         main_category: str = Field(description="The primary job category from the provided list")
         sub_category: str = Field(description="The specific sub-category")
-        level: str = Field(description="The expirement level is needed(intern/junior/senior/lead) just one value from that list!")
+        level: str = Field(description="The experience level (intern/junior/senior/lead)")
 
-
-
-    #set llm engine
     llm = ChatGoogleGenerativeAI(
         model="gemini-3.1-flash-lite-preview",
         api_key=os.getenv("GOOGLE_API_KEY"),
-        temperature=0
+        temperature=0  # Deterministic output — same CV always gives same result
     )
 
-
-
+    # Hierarchical categories with keywords for CV classification
+    # More detailed than the job categories — needed to handle edge cases in CVs
     my_categories = {
         "Data & BI": {
             "keywords": ["data", "bi", "crm", "sap", "ml", "analytics"],
@@ -366,10 +402,7 @@ def resume_classification(resume_text):
         }
     }
 
-
-
-
-    # 3. הגדרת ה-Prompt לסיווג
+    # CV classification prompt — analyzes the candidate's full resume text
     template = """You are an expert career classification system. Your task is to classify a candidate based on their resume/CV content.
 
 ⚠️ CRITICAL RULES:
@@ -401,119 +434,162 @@ Return ONLY a valid JSON object:
 CRITICAL: Return ONLY JSON, no other text.
 """
 
-    
-
     prompt = ChatPromptTemplate.from_template(template)
     parser = JsonOutputParser(pydantic_object=CvClassification)
     chain = prompt | llm | parser
 
-
     try:
         print("Classifying CV...")
         result = chain.invoke({
-            "resume_text": resume_text, # הטקסט של קורות החיים שלך
+            "resume_text": resume_text,
             "my_categories": my_categories,
             "format_instructions": parser.get_format_instructions()
         })
 
-        # 2. חילוץ הערכים למשתנים בודדים
         resume_main_category = result.get('main_category', 'Other')
         resume_sub_category = result.get('sub_category', 'Other')
         resume_level = result.get('level', 'junior')
 
-        # הדפסה לבדיקה
-        print(f"--- Classification Results ---")
-        print(f"Level: {resume_level}")
-        print(f"Main Category: {resume_main_category}")
-        print(f"Sub Category: {resume_sub_category}")
-
+        print(f"CV classified → {resume_main_category} / {resume_sub_category} / {resume_level}")
         return resume_level, resume_main_category, resume_sub_category
-    
-    except Exception as e:
-        print(f"Error during classification: {e}")
-        return "junior", "General", "Blue Collar"  # ערכי ברירת מחדל במקרה של שגיאה
 
-# --- פונקציות לוגיקה (מותאמות) ---
+    except Exception as e:
+        print(f"CV classification failed: {e}")
+        # Safe fallback — will still score jobs but with generic category
+        return "junior", "General", "Blue Collar"
+
+
+# =============================================================================
+# UTILITY FUNCTIONS
+# =============================================================================
 
 def clean_text(text):
-    if not text: return ""
+    """
+    Normalize extracted PDF text:
+    - Collapse multiple spaces within lines
+    - Remove blank lines
+    This reduces noise in NLP processing and LLM input.
+    """
+    if not text:
+        return ""
     lines = text.split('\n')
     return '\n'.join([" ".join(line.split()) for line in lines if line.strip()])
 
+
 def extract_keywords(text):
+    """
+    Extract meaningful keywords from text using spaCy NLP.
+    Keeps only nouns, proper nouns, and adjectives — these carry the most signal.
+    Lemmatizes tokens (engineer ← engineers) for consistent matching.
+    Filters out junk_words to remove generic HR and structural vocabulary.
+    """
     doc = nlp(text.lower())
-    keywords = {token.lemma_ for token in doc if token.pos_ in ['NOUN', 'PROPN', 'ADJ'] 
-                and token.lemma_ not in junk_words and len(token.lemma_) > 2}
+    keywords = {
+        token.lemma_ for token in doc
+        if token.pos_ in ['NOUN', 'PROPN', 'ADJ']
+        and token.lemma_ not in junk_words
+        and len(token.lemma_) > 2  # Skip very short tokens
+    }
     return keywords
 
 
-    
-
 def category_score(resume_category, resume_sub_category, job_category, job_sub_category):
+    """
+    Score how well the CV's category matches the job's category.
+    Returns 0–100:
+      100 — exact match on both main and sub category
+       75 — same main category, different sub (still relevant but not ideal)
+        0 — different main category entirely (essentially a mismatch)
+    """
     if resume_category != job_category:
         return 0
     if job_sub_category != resume_sub_category:
-        return 75
+        return 75  # Close match — same field, slightly different role
     return 100
-        
-    
 
+
+# =============================================================================
+# ATS MATCHER — Core scoring engine
+# For each job in the DB, computes a 4-component match score against the CV.
+#
+# Components (weights must sum to 100%):
+#   25% — category_score: main + sub category alignment
+#   30% — skill_score: % of job's gold skills also found in the CV
+#   25% — seniority_score: how well CV level matches job level
+#   20% — semantic_contribution: cosine similarity of BERT embeddings * 0.20
+#
+# Seniority scoring:
+#   Exact match         → 100
+#   CV overqualified -1 → 80  (small penalty — overqualified candidates exist)
+#   CV overqualified -2 → 60  (larger penalty)
+#   CV underqualified -1→  50  (more penalized — hard to get hired without experience)
+#   CV underqualified -2→   0  (very unlikely to be hired)
+# =============================================================================
 def ats_matcher(resume_text, jobs_df, resume_level, resume_category, resume_sub_category):
     resume_processed = resume_text.lower()
     resume_keywords = extract_keywords(resume_text)
+
+    # Intersect CV keywords with gold_skills → set of skills the candidate has
     cv_gold_skills = resume_keywords & gold_skills
+
+    # Encode the full CV text into a BERT embedding for semantic comparison
     resume_emb = model.encode(resume_processed, convert_to_tensor=True)
-    
-    
+
     results = []
+
     for idx, row in jobs_df.iterrows():
         job_desc = row['description_text']
         job_title = row['job_title']
-        job_main_cat= row['main_category']
-        job_sub_cat= row['sub_category']
+        job_main_cat = row['main_category']
+        job_sub_cat = row['sub_category']
         job_level = row['level']
-        # חישוב ציון קטגוריה
-        category_score_value = category_score(resume_category, resume_sub_category, job_main_cat, job_sub_cat)
-       # --- תיקון חלק הסמנטיקה בתוך הלולאה ---
+
+        # --- Component 1: Category score (25%) ---
+        category_score_value = category_score(
+            resume_category, resume_sub_category, job_main_cat, job_sub_cat
+        )
+
+        # --- Component 4: Semantic score (20%) ---
+        # Decode the stored BERT BLOB back to a numpy float32 vector
+        # then compute cosine similarity with the CV embedding
         if pd.notna(row["bert_vector"]):
             try:
-                # טעינת הוקטור מהבייטים
                 job_emb = np.frombuffer(row["bert_vector"], dtype=np.float32)
-                
-                # חישוב ציון סמנטי
-                similarity = util.cos_sim(resume_emb, job_emb).item()
-                semantic_score = similarity * 100
-            except Exception as e:
-                # הגנה למקרה שה-blob פגום
-                semantic_score = 0
+                similarity = util.cos_sim(resume_emb, job_emb).item()  # Returns -1 to 1
+                semantic_score = similarity * 100  # Scale to 0–100
+            except Exception:
+                semantic_score = 0  # Corrupted BLOB — treat as no signal
         else:
-            semantic_score = 0
-        # Skills score
+            semantic_score = 0  # No vector stored — skip semantic component
+
+        # --- Component 2: Skills score (30%) ---
         job_keywords = extract_keywords(job_desc)
-        job_gold_skills = job_keywords & gold_skills
-        matched_gold = cv_gold_skills & job_gold_skills
+        job_gold_skills = job_keywords & gold_skills  # Skills the job requires
+        matched_gold = cv_gold_skills & job_gold_skills  # Skills both CV and job have
+        # % of job-required skills that the candidate possesses
         skill_score = (len(matched_gold) / len(job_gold_skills)) * 100 if job_gold_skills else 0
 
-        # Seniority score (25%)
+        # --- Component 3: Seniority score (25%) ---
         level_order = ["intern", "junior", "senior", "lead"]
         resume_idx = level_order.index(resume_level) if resume_level in level_order else 1
         job_idx = level_order.index(job_level.lower()) if job_level and job_level.lower() in level_order else 1
-        level_diff = resume_idx - job_idx  # positive = CV more experienced than job
+        level_diff = resume_idx - job_idx  # Positive = CV more experienced than job
+
         if level_diff == 0:
-            seniority_score = 100
+            seniority_score = 100   # Perfect seniority match
         elif level_diff == -1:
-            seniority_score = 50   # CV underqualified by 1 level
+            seniority_score = 50    # CV underqualified by 1 level (e.g. junior applying to senior)
         elif level_diff < -1:
-            seniority_score = 0    # CV underqualified by 2+ levels
+            seniority_score = 0     # CV underqualified by 2+ levels — very unlikely to be hired
         elif level_diff == 1:
-            seniority_score = 80   # CV slightly overqualified — small penalty
+            seniority_score = 80    # CV slightly overqualified — still viable
         else:
-            seniority_score = 60   # CV very overqualified — bigger penalty
+            seniority_score = 60    # CV very overqualified — may not be interested
 
-        # Semantic score capped at cosine similarity * 20 (direct contribution, no extra weight)
-        semantic_contribution = semantic_score * 0.20  # semantic_score is already 0-100
+        # --- Final combined score ---
+        # Semantic contribution is cosine * 0.20 (max 20 points out of 100)
+        semantic_contribution = semantic_score * 0.20
 
-        # Combined score: 25% category, 30% skills, 25% seniority, 20% semantic
         combined_score = (
             0.25 * category_score_value +
             0.30 * skill_score +
@@ -527,69 +603,90 @@ def ats_matcher(resume_text, jobs_df, resume_level, resume_category, resume_sub_
             'url': row['URL'],
             'date': row['search_date'],
             'description': row['description_text'],
-            'match_score': max(0, round(combined_score, 1)),
-            'score_category': round(category_score_value, 1),
+            'match_score': max(0, round(combined_score, 1)),   # Never show negative scores
+            'score_category': round(category_score_value, 1),  # Shown in UI breakdown
             'score_skills': round(skill_score, 1),
             'score_seniority': round(seniority_score, 1),
-            'score_semantic': round(semantic_score, 1),
+            'score_semantic': round(semantic_score, 1),        # Raw 0–100 before weighting
             'matched_skills': list(matched_gold),
             'missing_skills': list(job_gold_skills - cv_gold_skills),
             'location': row['location'],
             'search_date': row['search_date'],
             'main_category': row['main_category']
-        })      
-    
+        })
+
+    # Return sorted by match score descending — best matches first
     return pd.DataFrame(results).sort_values('match_score', ascending=False)
 
-# --- ממשק המשתמש (Frontend) ---
 
-st.markdown("<h1 style='text-align: center; color: #0a66c2;'>LinkedIn Best Jobs for You</h1>", unsafe_allow_html=True)
+# =============================================================================
+# STREAMLIT UI
+# =============================================================================
 
+st.markdown(
+    "<h1 style='text-align: center; color: #0a66c2;'>LinkedIn Best Jobs for You</h1>",
+    unsafe_allow_html=True
+)
+
+# PDF uploader — user drags in their CV
 uploaded_file = st.file_uploader("העלה קורות חיים (PDF)", type="pdf")
 
 if uploaded_file:
+    # Extract all text from every page of the PDF
     with pdfplumber.open(uploaded_file) as pdf:
         raw_text = "\n".join([p.extract_text() for p in pdf.pages if p.extract_text()])
-    
+
     cleaned_cv = clean_text(raw_text)
-    
+
+    # Show the extracted CV text in a collapsible section for the user to verify
     with st.expander("📄 קורות החיים שלך:"):
         st.text_area("", cleaned_cv, height=450)
 
-    # טעינת משרות מה-DB
+    # Classify the CV → get the category + level to use for job filtering and scoring
     conn = sqlite3.connect('linkedin_jobs.db')
     resume_level, resume_category, resume_sub_category = resume_classification(cleaned_cv)
-    
 
-    query = "SELECT * FROM jobs WHERE main_category = ?"
-    print(f"resume category is {resume_category}")
-    # אם לא זוהתה קטגוריה (Other), נמשוך את הכל כגיבוי
+    # Pull only jobs in the same main category as the CV for efficiency
+    # If category is "Other" (unclassified), fall back to the full job list
+    print(f"CV classified as: {resume_category}")
     if resume_category == "Other":
-        query = "SELECT * FROM jobs"
-        jobs_df = pd.read_sql_query(query, conn)
+        jobs_df = pd.read_sql_query("SELECT * FROM jobs", conn)
     else:
-        jobs_df = pd.read_sql_query(query, conn, params=(resume_category,))
+        jobs_df = pd.read_sql_query(
+            "SELECT * FROM jobs WHERE main_category = ?", conn, params=(resume_category,)
+        )
 
     conn.close()
 
     if not jobs_df.empty:
         st.write("---")
         st.subheader("המשרות המתאימות ביותר עבורך:")
-        
+
+        # Run the scoring engine — may take a few seconds for large job sets
         with st.spinner("...מוצא לך את המשרות המתאימות ביותר בשבילך"):
             results_df = ats_matcher(cleaned_cv, jobs_df, resume_level, resume_category, resume_sub_category)
+
+        # Cap at top 50 — showing more adds noise and slows rendering
         results_df = results_df.head(50)
         st.subheader("נמצאו {} משרות מתאימות עבורך".format(len(results_df)))
+
+        # Render one card per job
         for _, row in results_df.iterrows():
-            # יצירת כרטיס משרה בסגנון לינקדין
             with st.container():
+                # 4-column layout: score | job info | description | apply button
                 c1, c2, c3, c4 = st.columns([1, 1, 3, 1])
-                
+
                 with c1:
+                    # Color-coded match percentage: green >70%, orange >40%, red otherwise
                     score = row['match_score']
                     color = "green" if score > 70 else "orange" if score > 40 else "red"
-                    st.markdown(f"<h2 style='color:{color}; text-align:center;'>{int(score)}%</h2>", unsafe_allow_html=True)
+                    st.markdown(
+                        f"<h2 style='color:{color}; text-align:center;'>{int(score)}%</h2>",
+                        unsafe_allow_html=True
+                    )
                     st.caption("<p style='text-align:center;'>Match Score</p>", unsafe_allow_html=True)
+
+                    # Score breakdown — shows contribution of each component
                     st.markdown(
                         f"<small>"
                         f"🏷️ Category: <b>{row['score_category']}%</b><br>"
@@ -599,35 +696,40 @@ if uploaded_file:
                         f"</small>",
                         unsafe_allow_html=True
                     )
+
+                    # Show up to 5 missing skills so the user knows what gaps to address
                     if row['missing_skills']:
-                        st.markdown(f"<small>❌ Missing: {', '.join(row['missing_skills'][:5])}</small>", unsafe_allow_html=True)
+                        st.markdown(
+                            f"<small>❌ Missing: {', '.join(row['missing_skills'][:5])}</small>",
+                            unsafe_allow_html=True
+                        )
+
                 with c2:
+                    # Job metadata
                     st.markdown(f"### {row['job_title']}")
                     st.markdown(f"**{row['company']}**")
                     st.markdown(f"**{row['location']}**")
                     st.markdown(f"**{row['search_date']}**")
                     st.markdown(f"**{row['main_category']}**")
-                   
+
                 with c3:
                     st.write("")
                     desc = row['description'] or ""
+                    # Show first 800 chars inline — enough context without cluttering
                     st.write(desc[:800])
+                    # Rest available in an expander to keep the card compact
                     if len(desc) > 800:
                         with st.expander("🔍 קרא עוד"):
                             st.write(desc[800:])
-                
+
                 with c4:
-                    st.write("") # ריווח
+                    st.write("")
+                    # Direct apply link back to LinkedIn
                     st.link_button("Apply on LinkedIn", row['url'], use_container_width=True)
+
                 st.markdown("---")
     else:
         st.error("לא נמצאו משרות בבסיס הנתונים.")
 
-# עיצוב רקע
+# Final CSS override — force white background over Streamlit's default
 st.markdown("<style>.stApp { background-color: white; }</style>", unsafe_allow_html=True)
-
-
-
-
-
-
