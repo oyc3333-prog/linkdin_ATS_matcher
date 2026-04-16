@@ -1,4 +1,5 @@
 streamlit
+python-dotenv
 pandas
 pdfplumber
 numpy==1.26.4

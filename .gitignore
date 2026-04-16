@@ -1,0 +1,18 @@
+# Secrets & credentials
+credentials.json
+gen-lang-client-*.json
+.env
+
+# Databases
+*.db
+
+# Not part of pipeline
+Linkedin_Scraper_Tutorial.ipynb
+classify_jobs_local.py
+jobs_sample_500.csv
+jobs_sample_500_v2.csv
+test.py
+test_chunk.py
+LICENSE
+README.md
+ai_agent.py

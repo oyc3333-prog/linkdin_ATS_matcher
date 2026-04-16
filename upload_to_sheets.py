@@ -14,10 +14,14 @@ conn.close()
 # 2. הגדרת הרשאות גוגל - הדרך המעודכנת
 scope = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
 
-if os.path.exists('credentials.json'):
+CREDS_FILE = 'gen-lang-client-0461607979-8daea5a37acc.json'
+
+if os.path.exists(CREDS_FILE):
+    creds = Credentials.from_service_account_file(CREDS_FILE, scopes=scope)
+elif os.path.exists('credentials.json'):
     creds = Credentials.from_service_account_file('credentials.json', scopes=scope)
 else:
-    # שליפה מה-Secret של GitHub
+    # GitHub Actions secret
     creds_info = json.loads(os.environ['GCP_SERVICE_ACCOUNT_JSON'])
     creds = Credentials.from_service_account_info(creds_info, scopes=scope)
 

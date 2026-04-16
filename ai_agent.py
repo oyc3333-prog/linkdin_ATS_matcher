@@ -2,467 +2,320 @@ import os
 import time
 import sqlite3
 import pandas as pd
+from dotenv import load_dotenv
 
 from pydantic import BaseModel, Field
 from langchain_core.output_parsers import JsonOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_google_genai import ChatGoogleGenerativeAI
 
+load_dotenv()
 print("Starting AI Agent - Reclassifying All Jobs...")
 
-# 1. הגדרת המבנה (הטופס) - הפעם עם Pydantic סטנדרטי
 class JobClassification(BaseModel):
     URL: str = Field(description="The original URL of the job")
     main_category: str = Field(description="The primary job category from the provided list")
     sub_category: str = Field(description="The specific sub-category")
-    level: str = Field(description="The expirement level is needed(intern/junior/senior/lead) just one value from that list!")
+    level: str = Field(description="The experience level (intern/junior/senior/lead)")
 
 class jobClassClassificationList(BaseModel):
     job_list: list[JobClassification]
 
-# כאן אתה שם את המפתח שהוצאת מ-Google AI Studio (זה שמתחיל ב-AIza)
-api_key = os.environ.get("GOOGLE_API_KEY")
+api_key = os.getenv("GOOGLE_API_KEY")
 llm = ChatGoogleGenerativeAI(
     model="gemini-3.1-flash-lite-preview",
-    api_key=api_key,
+    google_api_key=api_key,
     temperature=0
 )
 
 my_categories = {
-    "Data & BI": {
-        "keywords": ["data", "bi", "crm", "sap", "ml", "analytics"],
-        "sub_categories": {
-            "Data Analyst": [ "data analyst", "tableau", "power bi", "looker", "product analyst", "business analyst"],
-            "Data Engineer": ["data engineer", "etl", "pipeline", "airflow", "bigquery", "redshift", "spark"],
-            "Data Science": ["scientist", "machine learning", "ml", "nlp", "deep learning", "researcher"],
-            "AI Engineer": ["ai engineer", "genai", "generative ai", "llm", "langchain", "openai", "rag"],
-            "Data Operations": ["operations", "ops"]
-        }
-    },
-    "Software Engineering": {
-        "keywords": ["software", "developer", "engineer", "fullstack", "backend", "frontend", "programming"],
-        "sub_categories": {
-            "Backend Dev": ["backend", "backend developer"],
-            "Frontend Dev": ["frontend", "front", "frontend developer"],
-            "Fullstack Dev": ["fullstack", "full-stack", "full stack"],
-            "Mobile Dev": ["ios", "android", "mobile", "flutter"]
-        }
-    },
-    "Cyber & IT": {
-        "keywords": ["cyber", "security", "it", "system", "cloud", "network", "infosec"],
-        "sub_categories": {
-            "Security Analyst": ["security analyst", "soc", "penetration", "pt", "grc", "ciso", "vulnerability"],
-            "DevOps": ["devops", "sre", "kubernetes", "docker", "terraform", "jenkins", "ci/cd"],
-            "IT & System Admin": ["it", "help desk", "support", "sysadmin", "system administrator", "network engineer"]
-        }
-    },
-    "Product & Design": {
-        "keywords": ["product", "manager", "designer", "graphic", "design"],
-        "sub_categories": {
-            "Product Manager": ["product manager", "product owner", "po", "pm", "inbound", "outbound", "pmo", "project manager"],
-            "UX/UI Designer": ["ux", "ui", "product designer", "user experience", "user interface"],
-            "Graphic Designer": ["graphic", "motion", "illustrator", "photoshop", "creative designer"]
-        }
-    },
-    "QA": {
-        "keywords": ["qa", "testing", "quality", "test", "verification", "validation"],
-        "sub_categories": {
-            "QA Manual": ["manual"],
-            "QA Automation": ["automation", "sdet", "selenium", "playwright", "cypress", "aut"]
-        }
-    },
-    "Hardware & Mechanical": {
-        "keywords": ["hardware", "board", "electrical", "vlsi", "asic", "fpga", "chip", "rf", "mechanical", "engineer", "technician", "maintenance"],
-        "sub_categories": {
-            "Hardware Engineer": ["hardware engineer", "board design", "circuit", "analog"],
-            "Mechanical Engineer": ["mechanical engineer", "mechanical technician", "machine"],
-            "Electrical Engineer": ["electrical engineer", "power engineer", "rf engineer"],
-            "Maintenance Technician": ["maintenance technician", "maintenance", "technician", "repair"],
-            "VLSI/Chip Design": ["vlsi", "asic", "fpga", "verification engineer", "rtl"]
-        }
-    },
-    "Business & Sales": {
-        "keywords": ["sales", "business development", "sdr", "bdr", "account", "success", "B2B", "sales manager"],
-        "sub_categories": {
-            "Sales / Account": ["account executive", "sales manager", "ae", "account manager"],
-            "SDR / BDR": ["sdr", "bdr", "business development representative", "lead generation"],
-            "Customer Success": ["customer success", "csm", "client success"]
-        }
-    },
-    "Operations & Logistics": {
-        "keywords": ["operations", "logistics", "warehouse", "supply chain", "inventory", "fulfillment"],
-        "sub_categories": {
-            "Warehouse Operations": ["warehouse", "picker", "packer", "fulfillment"],
-            "Supply Chain": ["supply chain", "procurement", "logistics"],
-            "Operations Manager": ["operations manager", "operations coordinator"]
-        }
-    },
-    "Retail & Customer Service": {
-        "keywords": ["retail", "store", "customer service", "sales associate", "cashier", "shop", "commercial"],
-        "sub_categories": {
-            "Store Manager": ["store manager", "retail manager", "shop manager"],
-            "Sales Associate": ["sales associate", "retail associate", "cashier"],
-            "Customer Service": ["customer service", "customer support", "call center"]
-        }
-    },
-    "HR & Administration": {
-        "keywords": ["hr", "human resources", "recruitment", "admin", "administrative"],
-        "sub_categories": {
-            "HR Specialist": ["hr", "recruiter", "recruitment", "talent acquisition"],
-            "Administrator": ["admin", "administrative", "office administrator"]
-        }
-    },
-    "Finance & Accounting": {
-        "keywords": ["finance", "accountant", "accounting", "bookkeeper", "financial"],
-        "sub_categories": {
-            "Accountant": ["accountant", "bookkeeper", "financial analyst"],
-            "Finance Manager": ["finance manager", "financial manager", "controller"]
-        }
-    }
+    "Data & BI": ["Data Analyst", "Data Engineer", "Data Science", "AI Engineer", "Data Operations"],
+    "Software Engineering": ["Backend Dev", "Frontend Dev", "Fullstack Dev", "Mobile Dev", "Embedded Software Engineer"],
+    "Cyber & IT": ["Security Analyst", "DevOps", "IT & System Admin"],
+    "Product & Design": ["Product Manager", "UX/UI Designer", "Graphic Designer"],
+    "QA": ["QA Manual", "QA Automation"],
+    "Hardware & Mechanical": ["Hardware Engineer", "Mechanical Engineer", "Electrical Engineer", "Maintenance Technician", "VLSI/Chip Design", "Process/Industrial Engineer"],
+    "Business & Sales": ["Sales / Account", "SDR / BDR", "Customer Success", "Marketing"],
+    "Operations & Logistics": ["Supply Chain", "Operations Manager"],
+    "Retail & Customer Service": ["Store Manager", "Sales Associate", "Customer Service"],
+    "HR & Administration": ["HR Specialist", "Administrator", "Legal"],
+    "Finance & Accounting": ["Accountant", "Finance Manager"],
+    "General": ["Blue Collar", "Other"],
 }
 
-# 3. הגדרת ה-Prompt לסיווג
-template = """You are an expert career classification system. Your task is to classify jobs into categories based on the job title and description.
+template = """You are an expert career classification system for an Israeli job market dataset.
 
-IMPORTANT RULES:
-1. Read the job TITLE first - it's usually the most accurate indicator
-2. Use description as secondary confirmation
-3. Match ONLY from the provided categories list
-4. If no clear match exists, use "Other"
-5. Be precise and careful - avoid defaults
+⚠️ CRITICAL RULES — READ ALL BEFORE CLASSIFYING:
 
-CLASSIFICATION CATEGORIES:
+1. TITLE FIRST: The job title is the primary signal. Use description only to resolve ambiguity.
+2. HEBREW SUPPORT: Job titles and descriptions may be in Hebrew. Classify by MEANING, not by language.
+3. BLUE COLLAR ONLY for physical/manual labor: warehouse picker, driver, cleaner, security guard, construction worker → "General" / "Blue Collar". NEVER assign an office or professional role to Blue Collar.
+4. FALLBACK: If a professional role doesn't fit any specific category → use "General" / "Other". Do NOT use Blue Collar as a fallback.
+5. PRECISE MATCH: For professional/office/tech roles, always pick the most specific matching category.
+
+--- HEBREW → CATEGORY QUICK REFERENCE ---
+מלקט / מחסנאי / עובד מחסן          → General / Blue Collar
+נהג / שליח / מחלק / בלדר           → General / Blue Collar
+מנקה / עובד ניקיון                   → General / Blue Collar
+שומר / אבטחה / סייר                  → General / Blue Collar
+עובד ייצור / עובד הרכבה / פועל        → General / Blue Collar
+קופאי/ת (simple cashier role)        → Retail & Customer Service / Sales Associate
+מנהל חנות / מנהל סניף               → Retail & Customer Service / Store Manager
+מנהל מחסן / מנהל לוגיסטיקה          → Operations & Logistics / Operations Manager
+מגייס/ת / איש גיוס                  → HR & Administration / HR Specialist
+מנהל/ת משרד / עוזר/ת אדמין          → HR & Administration / Administrator
+רו"ח / חשבונאי / בוקיפר              → Finance & Accounting / Accountant
+מנהל כספים / CFO                    → Finance & Accounting / Finance Manager
+מפתח תוכנה / מהנדס תוכנה (backend)  → Software Engineering / Backend Dev
+מפתח Full Stack / פולסטאק           → Software Engineering / Fullstack Dev
+מפתח frontend / ממשק                 → Software Engineering / Frontend Dev
+מנהל מוצר / Product Manager          → Product & Design / Product Manager
+מעצב UX/UI                          → Product & Design / UX/UI Designer
+מנתח נתונים / Data Analyst            → Data & BI / Data Analyst
+מדען נתונים / Data Scientist          → Data & BI / Data Science
+מהנדס נתונים / Data Engineer          → Data & BI / Data Engineer
+מהנדס AI / בינה מלאכותית             → Data & BI / AI Engineer
+מהנדס חומרה / Hardware Engineer       → Hardware & Mechanical / Hardware Engineer
+מהנדס חשמל / Electrical Engineer      → Hardware & Mechanical / Electrical Engineer
+מהנדס מכונות / Mechanical Engineer    → Hardware & Mechanical / Mechanical Engineer
+מהנדס תהליך / Process Engineer        → Hardware & Mechanical / Process/Industrial Engineer
+מהנדס ייצור / Manufacturing Engineer  → Hardware & Mechanical / Process/Industrial Engineer
+טכנאי תחזוקה / Maintenance Tech       → Hardware & Mechanical / Maintenance Technician
+DevOps / ענן / Cloud Engineer         → Cyber & IT / DevOps
+אנליסט סייבר / Security Analyst        → Cyber & IT / Security Analyst
+מנהל מערכות / IT Manager              → Cyber & IT / IT & System Admin
+QA אוטומציה / Automation Tester        → QA / QA Automation
+QA ידני / Manual Tester               → QA / QA Manual
+מנהל מכירות / Sales Manager           → Business & Sales / Sales / Account
+SDR / BDR / נציג פיתוח עסקי           → Business & Sales / SDR / BDR
+Customer Success / הצלחת לקוח         → Business & Sales / Customer Success
+שיווק / מנהל שיווק / Marketing         → Business & Sales / Marketing
+עורך דין / יועץ משפטי                 → HR & Administration / Legal
+
+--- CLASSIFICATION CATEGORIES ---
 {my_categories}
 
-SENIORITY LEVELS TO USE: intern, junior, senior, lead
-- If not explicitly mentioned in the job posting, default to "junior"
+--- SENIORITY LEVELS ---
+intern | junior | senior | lead
 
-EXAMPLES OF CORRECT CLASSIFICATIONS:
-- Job: "Store Manager" → main_category: "Retail & Customer Service", sub_category: "Store Manager", level: "senior"
-- Job: "Warehouse Picker" → main_category: "Operations & Logistics", sub_category: "Warehouse Operations", level: "junior"
-- Job: "Mechanical Engineer" → main_category: "Hardware & Mechanical", sub_category: "Mechanical Engineer", level: "junior"
-- Job: "Maintenance Technician" → main_category: "Hardware & Mechanical", sub_category: "Maintenance Technician", level: "junior"
-- Job: "Sensor Engineer" → main_category: "Hardware & Mechanical", sub_category: "Electrical Engineer", level: "junior"
-- Job: "Python Data Scientist" → main_category: "Data & BI", sub_category: "Data Science", level: "junior"
+Use these rules IN ORDER (first match wins):
+1. Title/description contains "head of", "director", "vp ", "vice president", "chief", "c-level" → lead
+2. Title contains "lead " (as a modifier, e.g. "lead engineer") → lead
+3. Title/description contains "senior", "sr.", "principal", "staff engineer" → senior
+4. Title contains " ii", " iii", " iv" as a suffix (e.g. "Engineer II") → senior
+5. Title contains "manager" and NOT preceded by "junior" or "assistant" → senior
+6. Description mentions "5+ years", "7+ years", "8+ years" → senior
+7. Title/description contains "intern", "internship" → intern
+8. Title/description contains "student", "graduate 2025", "graduate 2026", "סטודנט", "בוגר טרי" → intern
+9. Title/description contains "junior", "jr.", "entry level", "0-2 years" → junior
+10. No clear seniority signal → junior (last resort only)
 
-JOBS TO CLASSIFY:
+--- JOBS TO CLASSIFY ---
 {jobs_json}
 
-Return ONLY a valid JSON object with this exact structure:
+Return ONLY valid JSON, no other text:
 {{
   "job_list": [
     {{
       "URL": "exact URL from input",
-      "main_category": "category name from list",
-      "sub_category": "subcategory name from list",
+      "main_category": "category name from list above",
+      "sub_category": "subcategory name from list above",
       "level": "intern|junior|senior|lead"
     }}
   ]
-}}
+}}"""
 
-CRITICAL: Return ONLY JSON, no other text.
-"""
+import re
+
+def extract_requirements(description: str) -> str:
+    """Extract only the requirements/qualifications section from a job description."""
+    if not description or not isinstance(description, str):
+        return ""
+
+    # Normalize whitespace
+    text = description.strip()
+
+    # Common section headers that signal requirements
+    req_patterns = [
+        r'(?i)(requirements?|qualifications?|what we(?:\'re| are) looking for|'
+        r'who you are|what you(?:\'ll| will) need|skills? (?:&|and) experience|'
+        r'must.have|experience (?:&|and) skills?|job requirements?|'
+        r'מה אנחנו מחפשים|דרישות|כישורים|ניסיון נדרש|תנאי קבלה)'
+        r'[:\s]*\n(.*?)(?=\n(?:[A-Z][^\n]{0,60}\n)|$)'
+    ]
+
+    # Try to extract requirements sections
+    for pattern in req_patterns:
+        matches = re.findall(pattern, text, re.DOTALL)
+        if matches:
+            combined = "\n".join(m if isinstance(m, str) else m[-1] for m in matches)
+            # Keep it under ~800 chars
+            return combined[:800].strip()
+
+    # Fallback: return first 500 chars which usually contain the role summary
+    return text[:500].strip()
+
 
 prompt = ChatPromptTemplate.from_template(template)
 parser = JsonOutputParser(pydantic_object=jobClassClassificationList)
 chain = prompt | llm | parser
 
-# 1. חיבור ל-SQL ומשיכת הנתונים
+
+def validate_classifications(df):
+    """Rule-based post-processing to fix obvious LLM errors."""
+    title_lower = df['job_title'].str.lower().fillna('')
+
+    # Level overrides — order matters: lead > senior > intern, junior is default
+    lead_mask = title_lower.str.contains(
+        r'head of|director|\bvp\b|vice president|\bchief\b|c-level',
+        regex=True
+    )
+    lead_mask |= title_lower.str.contains(r'\blead ', regex=True)
+
+    senior_mask = title_lower.str.contains(
+        r'\bsenior\b|\bsr\b\.|principal|\bstaff engineer\b| ii$| ii | iii | iv ',
+        regex=True
+    )
+    manager_mask = (
+        title_lower.str.contains(r'\bmanager\b', regex=True) &
+        ~title_lower.str.contains(r'junior|assistant', regex=True)
+    )
+    senior_mask |= manager_mask
+
+    intern_mask = title_lower.str.contains(
+        r'intern|internship|student|graduate 202',
+        regex=True
+    )
+
+    df.loc[lead_mask, 'level'] = 'lead'
+    df.loc[senior_mask & ~lead_mask, 'level'] = 'senior'
+    df.loc[intern_mask & ~lead_mask & ~senior_mask, 'level'] = 'intern'
+
+    # Blue Collar override — professional titles should NEVER be Blue Collar
+    professional_mask = title_lower.str.contains(
+        r'engineer|developer|analyst|designer|scientist|architect|consultant|'
+        r'specialist|officer|lawyer|controller|researcher|programmer|administrator|'
+        r'coordinator|strategist|economist|broker|planner',
+        regex=True
+    )
+    bad_blue_collar = (df['sub_category'] == 'Blue Collar') & professional_mask
+    df.loc[bad_blue_collar, 'sub_category'] = 'Other'
+    df.loc[bad_blue_collar, 'main_category'] = 'General'
+
+    fixed_level = int(lead_mask.sum()) + int((senior_mask & ~lead_mask).sum()) + int((intern_mask & ~lead_mask & ~senior_mask).sum())
+    fixed_cat = int(bad_blue_collar.sum())
+    print(f"  Post-processing: fixed {fixed_level} level(s), {fixed_cat} Blue Collar override(s)")
+    return df
+
+
+def invoke_with_retry(chain, payload, max_retries=3):
+    """Retry with backoff for rate limits. Abort immediately on auth errors."""
+    for attempt in range(max_retries):
+        try:
+            return chain.invoke(payload)
+        except Exception as e:
+            err = str(e)
+            if "PERMISSION_DENIED" in err or "API key" in err.lower():
+                print(f"  [ERROR] Auth error - check your API key: {err[:120]}")
+                return None  # No point retrying
+            elif "RESOURCE_EXHAUSTED" in err or "429" in err:
+                wait = 30 * (attempt + 1)
+                print(f"  [WAIT] Rate limit hit. Waiting {wait}s before retry {attempt + 1}/{max_retries}...")
+                time.sleep(wait)
+            else:
+                print(f"  [WARN] Unexpected error: {err[:120]}")
+                if attempt == max_retries - 1:
+                    return None
+                time.sleep(40)  # Wait before retrying on unexpected errors
+    return None
+
 conn = sqlite3.connect('linkedin_jobs.db')
 query = "SELECT * FROM jobs"
 df = pd.read_sql(query, conn)
 
 print(f"Found {len(df)} jobs in database. Starting reclassification...")
 
-# 4. הלולאה המתוקנת - איסוף הנתונים
-all_jobs_results = [] # רשימה במקום דיקשיונרי
+all_jobs_results = []
 chunk_size = 50
-for i in range(0, len(df), chunk_size):
+total_chunks = (len(df) + chunk_size - 1) // chunk_size
+
+# --- TEST: run first chunk only and report token usage ---
+print("\n=== TEST MODE: Running first chunk to check token usage ===")
+test_chunk = df.iloc[0:chunk_size]
+test_chunk_proc = test_chunk.copy()
+test_chunk_proc['description_text'] = test_chunk_proc['description_text'].apply(extract_requirements)
+test_jobs_json = test_chunk_proc[['URL', 'job_title', 'description_text']].to_json(orient='records')
+
+test_payload = {
+    "jobs_json": test_jobs_json,
+    "my_categories": my_categories,
+    "format_instructions": parser.get_format_instructions()
+}
+
+# Count tokens in the rendered prompt
+test_prompt_str = template.format(**{
+    "jobs_json": test_jobs_json,
+    "my_categories": my_categories,
+})
+token_count = llm.get_num_tokens(test_prompt_str)
+print(f"  Estimated input tokens for 1 chunk ({chunk_size} jobs): {token_count}")
+
+test_response = invoke_with_retry(chain, test_payload)
+if test_response and 'job_list' in test_response:
+    print(f"  [TEST OK] Got {len(test_response['job_list'])} classifications")
+    print(f"  Sample: {test_response['job_list'][0]}")
+    all_jobs_results.extend(test_response['job_list'])
+else:
+    print("  [TEST FAILED] No response from first chunk")
+
+print("=== TEST COMPLETE. Continuing with remaining chunks... ===\n")
+time.sleep(25)
+
+for i in range(chunk_size, len(df), chunk_size):
     chunk = df.iloc[i:i + chunk_size]
-    jobs_json = chunk[['URL', 'job_title', 'description_text']].to_json(orient='records')
+    chunk_proc = chunk.copy()
+    chunk_proc['description_text'] = chunk_proc['description_text'].apply(extract_requirements)
+    jobs_json = chunk_proc[['URL', 'job_title', 'description_text']].to_json(orient='records')
+    chunk_num = i // chunk_size + 1
 
-    try:
-        print(f"Processing chunk {i//chunk_size + 1} of {len(df)//chunk_size + 1}...")
-        response = chain.invoke({
-            "jobs_json": jobs_json,
-            "my_categories": my_categories,
-            "format_instructions": parser.get_format_instructions()
-        })
+    print(f"Processing chunk {chunk_num} of {total_chunks}...")
 
-        # חילוץ הרשימה מתוך התגובה והוספה לרשימה הכללית
-        if 'job_list' in response:
-            all_jobs_results.extend(response['job_list'])
+    response = invoke_with_retry(chain, {
+        "jobs_json": jobs_json,
+        "my_categories": my_categories,
+        "format_instructions": parser.get_format_instructions()
+    })
 
-        time.sleep(10)  # Rate limiting
-    except Exception as e:
-        print(f"Error in chunk {i//chunk_size + 1}: {e}")
-        continue
+    if response and 'job_list' in response:
+        all_jobs_results.extend(response['job_list'])
+        print(f"  [OK] Chunk {chunk_num} done - {len(response['job_list'])} jobs classified")
+    else:
+        print(f"  [SKIP] Chunk {chunk_num} skipped or failed")
 
-# הפיכה ל-DataFrame בסוף
+    time.sleep(25)  # 25 sec delay between chunks
+
 results_df = pd.DataFrame(all_jobs_results)
-print(f"Total jobs reclassified: {len(results_df)}")
+print(f"\nTotal jobs reclassified: {len(results_df)}")
 
-# עדכון ה-DataFrame המקורי עם התוצאות החדשות
 if not results_df.empty:
-    # יצירת מילון למיפוי מהיר לפי URL
     results_dict = {row['URL']: row for _, row in results_df.iterrows()}
 
-    # עדכון העמודות ב-DataFrame המקורי
-    df['main_category'] = df['URL'].map(lambda x: results_dict.get(x, {}).get('main_category', 'Other'))
+    df['main_category'] = df['URL'].map(lambda x: results_dict.get(x, {}).get('main_category', 'General'))
     df['sub_category'] = df['URL'].map(lambda x: results_dict.get(x, {}).get('sub_category', 'Other'))
     df['level'] = df['URL'].map(lambda x: results_dict.get(x, {}).get('level', 'junior'))
 
-    # שמירה חזרה ל-DB
-    df.to_sql('jobs', conn, if_exists='replace', index=False)
-    print("✅ Database updated with new classifications!")
+    print("Running post-processing validation...")
+    df = validate_classifications(df)
 
-    # הצגת סיכום
+    df.to_sql('jobs', conn, if_exists='replace', index=False)
+    print("Database updated with new classifications!")
+
     print("\n--- Classification Summary ---")
     print(df['main_category'].value_counts().head(10))
     print("\n--- Sample Results ---")
     print(df[['job_title', 'main_category', 'sub_category', 'level']].head(10))
-
 else:
-    print("❌ No results to update database with.")
+    print("No results to update database with.")
 
 conn.close()
-print("🎉 Reclassification complete!")
-
-
-# my_categories = { "Data & BI": {
-#         "keywords": ["data", "bi", "crm", "sap", "ml"],
-#         "sub_categories": {
-#             "Data Analyst": [ "data analyst", "tableau", "power bi", "looker", "product analyst", "business analyst"],
-#             "Data Engineer": ["data engineer", "etl", "pipeline", "airflow", "bigquery", "redshift", "spark"],
-#             "Data Science": ["scientist", "machine learning", "ml", "nlp", "deep learning", "researcher"],
-#             "AI Engineer": ["ai engineer", "genai", "generative ai", "llm", "langchain", "openai", "rag"],
-#             "Data Operations": ["operations", "ops"]
-#         }
-#     },
-#     "Software Engineering": {
-#         "keywords": ["software", "developer", "engineer", "fullstack", "backend", "frontend"],
-#         "sub_categories": {
-#             "Backend Dev": ["backend"],
-#             "Frontend Dev": ["frontend", "front"],
-#             "Fullstack Dev": ["fullstack", "full-stack", "full stack"],
-#             "Mobile Dev": ["ios", "android", "mobile"]
-#         }
-#     },
-#     "Cyber & IT": {
-#         "keywords": ["cyber", "security", "it", "system", "cloud", "network", "infosec"],
-#         "sub_categories": {
-#             "Security Analyst": ["security analyst", "soc", "penetration", "pt", "grc", "ciso", "security analyst", "vulnerability"],
-#             "DevOps": ["devops", "sre", "kubernetes", "docker", "terraform", "jenkins", "ci/cd"],
-#             "IT & System Admin": ["it", "help desk", "support", "sysadmin", "system administrator", "network engineer"]
-#         }
-#     },
-#     "Product & Design": {
-#         "keywords": ["product", "manager", "designer", "graphic"],
-#         "sub_categories": {
-#             "Product Manager": ["product manager", "product owner", "po", "pm", "inbound", "outbound", "pmo", "project manager"],
-#             "UX/UI Designer": ["ux", "ui", "product designer", "user experience", "user interface"],
-#             "Graphic Designer": ["graphic", "motion", "illustrator", "photoshop", "creative designer"]
-#         }
-#     },
-#     "QA": {
-#         "keywords": ["qa", "testing", "quality", "test", "verification", "validation"],
-#         "sub_categories": {
-#             "QA Manual": ["manual"],
-#             "QA Automation": ["automation", "sdet", "selenium", "playwright", "cypress", "aut"]
-#         }
-#     },
-#     "Hardware": {
-#         "keywords": ["hardware", "board", "electrical", "vlsi", "asic", "fpga", "chip", "rf"],
-#         "sub_categories": {
-#             "Hardware Engineer": ["hardware engineer", "board design", "circuit", "analog"],
-#             "VLSI/Chip Design": ["vlsi", "asic", "fpga", "verification engineer", "rtl"],
-#             "Electrical Engineer": ["electrical engineer", "power engineer", "rf engineer"]
-#         }
-#     },
-#     "Business & Sales": {
-#         "keywords": ["sales", "business development", "sdr", "bdr", "account", "success", "B2B"],
-#         "sub_categories": {
-#             "Sales / Account": ["account executive", "sales manager", "ae", "account manager"],
-#             "SDR / BDR": ["sdr", "bdr", "business development representative", "lead generation"],
-#             "Customer Success": ["customer success", "csm", "client success"]
-#         }
-#     }
-# }
-
-
-
-
-# # 2. בניית תבנית השאלה (Prompt)
-# # שים לב איך אנחנו משתמשים ב-parser מהשלב הקודם כדי להזריק את ההוראות
-# prompt = ChatPromptTemplate.from_template(
-#     """אתה מומחה לסיווג משרות טכנולוגיות. 
-#     עליך לסווג את המשרה הבאה לפי רשימת הקטגוריות הזו בלבד:
-#     {my_categories}
-#     בנוסף תסווג את רמת המשרה לפי הניסון הדרוש בה. אם אין ד. הרמות האפשריות: junior, mid, senior, intern. 
-#     אם לא כתוב מפורש תסווג את המשרה בjunior.
-
-#     הוראות פורמט (חובה לעקוב אחריהן):
-#     {format_instructions}
-
-#     פרטי המשרה לעיבוד:
-#     URL: {url}
-#     כותרת: {title}
-#     תיאור משרה: : {description}
-   
-#     """
-# )
-
-# # 3. חיבור הכל ביחד ל-Chain (פס ייצור)
-# # הסימן | אומר: קח את הפרומפט -> שלח ל-LLM -> תרגם עם ה-Parser
-# chain = prompt | llm | parser
-
-# print("ה-Chain מוכן לעבודה!")
-
-
-# # 1. חיבור ל-SQL ומשיכת הנתונים
-# # שנה את ה-connection string לפי מסד הנתונים שלך (SQLite/PostgreSQL/MySQL)
-# conn = sqlite3.connect('linkedin_jobs.db')
-# query = "SELECT * FROM jobs"
-# df = pd.read_sql(query, conn)
-
-
-
-# # 3. הגדרת ה-Prompt לסיווג
-# template = """
-# You are a career expert. Categorize the following list of jobs.
-# For each job ID, provide:
-# 1. Category (High-level field)
-# 2. Sub-category (Specific niche)
-# 3. Seniority Level (intern, Junior, Mid, Senior, Lead)
-# אתה מומחה לסיווג משרות טכנולוגיות. 
-#    clasificate jobs categories only from that category list!
-#     {my_categories}
-#    clasificate seniority level only to: intern, junior, mid, lead
-
-#     Return the results as a JSON object with a key 'job_list' containing an array of objects.
-# {format_instructions}
-
-   
-   
-    
-# Jobs List:
-# {jobs_json}
-
-# Return ONLY a JSON object where keys are Job IDs and values are objects with keys: 
-# "category", "sub_category", "level".
-# """
-
-# prompt = ChatPromptTemplate.from_template(template)
-# parser = JsonOutputParser(pydantic_object=jobClassClassificationList)
-# chain = prompt | llm | parser
-
-
-# # 4. הלולאה המתוקנת - איסוף הנתונים
-# all_jobs_results = [] # רשימה במקום דיקשיונרי
-# chunk_size = 100
-# for i in range(0, len(df), chunk_size):
-#     chunk = df.iloc[i:i + chunk_size]
-#     jobs_json = chunk[['URL', 'job_title', 'description_text']].to_json(orient='records')
-    
-#     try:
-#         print(f"Processing chunk {i//chunk_size + 1}...")
-#         response = chain.invoke({
-#             "jobs_json": jobs_json, 
-#             "my_categories": my_categories, 
-#             "format_instructions": parser.get_format_instructions()
-#         })
-        
-#         # חילוץ הרשימה מתוך התגובה והוספה לרשימה הכללית
-#         if 'job_list' in response:
-#             all_jobs_results.extend(response['job_list'])
-            
-#         time.sleep(20) 
-#     except Exception as e:
-#         print(f"Error: {e}")
-
-# # הפיכה ל-DataFrame בסוף
-# results_df = pd.DataFrame(all_jobs_results)
-# print(f"Total jobs classified: {len(results_df)}")
-# print(results_df)
-# df['main_category'] = results_df['main_category']
-# df['sub_category'] = results_df['sub_category']
-# df['level'] = results_df['level']
-# print(df.head(5))
-# if len(df) > 2000:
-#     df.to_sql('jobs', conn, if_exists='replace', index=False)
-#     print("Database updated with new classifications.")
-# else:
-#     print("Not updating database - less than 2000 records.")
-
-# # # 4. עיבוד בצאנקים של 50 משרות
-# # chunk_size = 10
-# # results_dict = {}
-
-# # for i in range(0, 20, chunk_size):
-# #     chunk = df.iloc[i:i + chunk_size]
-    
-# #     # הפיכת הצאנק ל-JSON (שולחים רק עמודות רלוונטיות כדי לחסוך טוקנים)
-# #     jobs_json = chunk[['URL', 'job_title', 'description_text']].to_json(orient='records')
-    
-# #     try:
-# #         print(f"Processing chunk {i//chunk_size + 1}...")
-# #         response = chain.invoke({"jobs_json": jobs_json, "my_categories": my_categories, "format_instructions": parser.get_format_instructions()})
-# #         print(response)
-# #         results_dict.update(response)
-        
-# #         # השהיה קלה למניעת חריגה מה-Rate Limit של ה-Free Tier
-# #         time.sleep(0.5) 
-# #     except Exception as e:
-# #         print(f"Error in chunk {i}: {e}")
-
-# # 5. עדכון ה-DataFrame המקורי
-# # אנחנו ממפים את התוצאות לפי ה-ID של המשרה
-# # df['category'] = df['URL'].apply(lambda x: results_dict.get(str(x), {}).get('category', 'Unknown'))
-# # df['sub_category'] = df['URL'].apply(lambda x: results_dict.get(str(x), {}).get('sub_category', 'Unknown'))
-# # df['level'] = df['URL'].apply(lambda x: results_dict.get(str(x), {}).get('level', 'Unknown'))
-
-# # # 6. הצגת סיכום
-# # print("\n--- Dataframe Info ---")
-# # print(df.info())
-# # print("\n--- Dataframe Head ---")
-# # print(df[['URL', 'job_title', 'category', 'sub_category', 'level']].head())
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-import sqlite3
-import pandas as pd
-
-
-
-import sqlite3
-import pandas as pd
-
-
-
-# 1. התחברות ל-DB (תוודא שהנתיב נכון לקובץ שלך)
-conn = sqlite3.connect("linkedin_jobs.db") 
-
-# 2. שאילתה לשליפת הטייטלים והקטגוריות
-# שים לב: השתמשתי בשמות העמודות שמופיעים בשגיאות הקודמות שלך
-query = """
-SELECT job_title, main_category, sub_category 
-FROM jobs 
-LIMIT 100
-"""
-
-
-df = pd.read_sql_query(query, conn)
-print(df.tail(200))
-
-
+print("Reclassification complete!")
