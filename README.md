@@ -1,5 +1,7 @@
 # LinkedIn ATS Matcher
 
+**Live app: [linkdin-ats-matcher.streamlit.app](https://linkdin-ats-matcher.streamlit.app/)**
+
 An automated pipeline that scrapes LinkedIn jobs daily, classifies them with AI, and matches them against your CV using a custom ATS scoring engine — served through a Streamlit web app.
 
 ---
