@@ -1,3 +1,0 @@
-# DISABLED — ai_agent.py is blacklisted, classification runs inside linkdin_scraper.py
-on: {}
-jobs: {}

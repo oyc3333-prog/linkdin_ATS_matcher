@@ -1,7 +1,7 @@
 # =============================================================================
 # daily_run.yml — Full LinkedIn pipeline, runs every day at 00:00 UTC
 #
-# Flow (all inside linkdin_scraper.py):
+# Flow (all inside scraper.py):
 #   1. Scrape job IDs and details from LinkedIn guest API
 #   2. Encode descriptions into BERT vectors (semantic search)
 #   3. Classify each job via Gemini LLM (category + level)
@@ -59,7 +59,7 @@ jobs:
         env:
           GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}           # Used by Gemini LLM
           GCP_SERVICE_ACCOUNT_JSON: ${{ secrets.GCP_SERVICE_ACCOUNT_JSON }}  # Used by upload_to_sheets.py
-        run: python linkdin_scraper.py
+        run: python scraper.py
 
       # Commit the updated DB back to the repo so the Streamlit app always has fresh data
       # "|| exit 0" prevents failure if there are no changes to commit
